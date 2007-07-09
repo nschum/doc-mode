@@ -89,10 +89,10 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
         (goto-char beg)
         (setq col (current-column))
         ;; move to beginning of line, if whitespace
-        (incf beg (skip-chars-backward " \t"))
+;;         (incf beg (skip-chars-backward " \t"))
         ;; search for end
         (when (search-forward "*/" nil t)
-          (skip-chars-forward " \t" (point-at-eol))
+;;           (skip-chars-forward " \t" (point-at-eol))
           (setq end (point))
           ;; check if this is actually right before POS
           (skip-chars-forward " \t\n\r" pos)
@@ -101,8 +101,10 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
 
 ;;; formating ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun doc-mode-markup (markup &optional description)
-  (concat "@" markup (when description " ") description))
+(defun doc-mode-markup (markup &optional argument description)
+  (concat "@" markup
+          (when argument " ") argument
+          (when description " ") description))
 
 (mapcar 'semantic-tag-name (semantic-tag-get-attribute xxx :arguments))
 
@@ -110,7 +112,8 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
   (append
    `("One line brief documentation.")
    (mapcar (lambda (argument)
-             (doc-mode-markup "param" (semantic-tag-name argument)))
+             (doc-mode-markup "param" (semantic-tag-name argument)
+                              "A value."))
            (semantic-tag-get-attribute tag :arguments))
    `(,(doc-mode-markup "return" "The return value"))
    ))
@@ -130,55 +133,115 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
       (string-match "[^ \t\n\r*/][^\r\n]*\n" str)
       (cons (+ (match-beginning 0) beg) (+ (match-end 0) beg)))))
 
-;;; folding ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 (defun doc-mode-find-eligible-tags ()
   (let ((tags (semantic-brute-find-tag-by-function
                (lambda (tag) (memq (semantic-tag-class tag) '(type function)))
                (semanticdb-file-stream (buffer-file-name)))))
     (nconc (mapcan 'semantic-tag-components tags) tags)))
 
-(defun doc-mode-fold-tag-comment (tag &optional show)
-  (assert doc-mode)
-  (let ((hidden (gethash tag doc-mode-overlay-map)))
-    ;; always get rid of old hiding overlays
-    (mapc 'delete-overlay hidden)
-    (if show
-        (remhash tag doc-mode-overlay-map)
-      (let ((bounds (doc-mode-find-doc-bounds (semantic-tag-start tag))))
-        (when bounds
-          (let* ((beg (plist-get bounds :beg))
-                 (end (plist-get bounds :end))
-                 (summary-bounds (doc-mode-find-summary beg end))
-                 (before-overlay (make-overlay beg (car summary-bounds)))
-                 (after-overlay (make-overlay (cdr summary-bounds) end)))
-            (overlay-put before-overlay 'invisible t)
-            (overlay-put after-overlay 'invisible t)
-            (puthash tag (list before-overlay after-overlay)
-                     doc-mode-overlay-map)))))))
+;;; folding ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun doc-mode-fold-all (arg)
+(defvar doc-mode-folds nil)
+(make-variable-buffer-local 'doc-mode-folds)
+
+(defun doc-mode-fold-doc (point)
+  (assert doc-mode)
+  (let ((bounds (doc-mode-find-doc-bounds point)))
+    (when bounds
+      (let* ((beg (plist-get bounds :beg))
+             (end (plist-get bounds :end))
+             (summary-bounds (doc-mode-find-summary beg end))
+             (before-overlay (make-overlay beg (car summary-bounds)))
+             (after-overlay (make-overlay (cdr summary-bounds) end))
+             (siblings (list before-overlay after-overlay)))
+        (dolist (ov siblings)
+          (overlay-put ov 'invisible t)
+          (overlay-put ov 'isearch-open-invisible-temporary
+                       'doc-mode-unfold-by-overlay-temporary)
+          (overlay-put ov 'isearch-open-invisible 'doc-mode-unfold-by-overlay)
+          (overlay-put ov 'doc-mode-fold siblings))
+        (setq doc-mode-folds (append doc-mode-folds siblings))))))
+
+(defun doc-mode-fold-tag-doc (tag)
+  "Fold TAG's documentation.
+If called interactively, use the tag given by `doc-mode-current-tag'."
+  (interactive (list (doc-mode-current-tag)))
+  (doc-mode-fold-doc (semantic-tag-start tag)))
+
+(defun doc-mode-unfold-by-overlay (overlay)
+  "Unfold OVERLAY and its siblings permanently"
+  (dolist (ov (overlay-get overlay 'doc-mode-fold))
+    ;; remove overlay
+    (setq doc-mode-folds (delq ov doc-mode-folds))
+    (delete-overlay ov)
+    ;; don't let isearch do anything with it
+    (setq isearch-opened-overlays (delq ov isearch-opened-overlays))))
+
+(defun doc-mode-unfold-by-overlay-temporary (overlay invisible)
+  "Unfold OVERLAY and its siblings temporarily."
+  (dolist (ov (overlay-get overlay 'doc-mode-fold))
+    (overlay-put ov 'invisible invisible)))
+
+(defun doc-mode-unfold-doc (point)
+  "Unfold the comment before POINT."
+  (interactive "d")
+  (let ((bounds (doc-mode-find-doc-bounds point)))
+    (when bounds
+      (let* ((beg (plist-get bounds :beg))
+             (end (plist-get bounds :end))
+             (overlays (overlays-in beg end))
+             anything-done)
+        (dolist (ov overlays)
+          (when (overlay-get ov 'doc-mode-fold)
+            (setq anything-done t)
+            (delete-overlay ov)
+            (setq doc-mode-folds (delq ov doc-mode-folds))))
+        ;; return non-nil, if anything unfolded
+        ;; this is used to toggle
+        anything-done))))
+
+(defun doc-mode-unfold-tag-doc (tag)
+  "Unfold TAG's documentation.
+If called interactively, use the tag given by `doc-mode-current-tag'."
+  (interactive (list (doc-mode-current-tag)))
+  (doc-mode-unfold-doc (semantic-tag-start tag)))
+
+;;; all
+
+(defun doc-mode-fold-all (&optional arg)
   (interactive "P")
-  (dolist (tag (doc-mode-find-eligible-tags))
-    (doc-mode-fold-tag-comment tag arg)))
+  (if arg
+      (doc-mode-unfold-all)
+    (dolist (tag (doc-mode-find-eligible-tags))
+      (doc-mode-fold-tag-comment tag arg))))
+
+(defun doc-mode-unfold-all ()
+  (dolist (ov doc-mode-folds)
+    (delete-overlay ov))
+  (kill-local-variable 'doc-mode-folds))
+
+;;; toggle
+
+(defun doc-mode-toggle-tag-folding (tag)
+  "Toggle folding of TAG's documentation.
+If called interactively, use the tag given by `doc-mode-current-tag'."
+  (interactive (list (doc-mode-current-tag)))
+  (or (doc-mode-unfold-tag-doc tag)
+      (doc-mode-fold-tag-doc tag)))
 
 ;;; keywords ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defconst doc-mode-keywords
   (eval-when-compile
-    `((,(concat "[@\\]" (regexp-opt '("param" "return") t) "\\>")
-       (0 font-lock-keyword-face prepend)))))
+    `((,(concat "[@\\]" (regexp-opt '("return") t) "\\>")
+       (0 font-lock-keyword-face prepend))
+      (,(concat "\\([@\\]" (regexp-opt '("param"))
+                "\\>\\)\\(?:\\s +\\(\\sw\\)+\\)?")
+       (1 font-lock-keyword-face prepend)
+       (2 font-lock-variable-name-face prepend)
+       ))))
 
 ;;; mode ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defun semantic-tag-hash (tag)
-  (+ (sxhash (semantic-tag-name tag)) (sxhash (semantic-tag-class tag))))
-
-(define-hash-table-test 'semantic-equivalent-tag-p
-  'semantic-equivalent-tag-p 'semantic-tag-hash)
-
-(defvar doc-mode-overlay-map nil)
-(make-variable-buffer-local 'doc-mode-overlay-map)
 
 (define-minor-mode doc-mode
   "Minor mode for editing in-code documentation."
@@ -188,9 +251,8 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
              (setq doc-mode-overlay-map
                    (make-hash-table :test 'semantic-equivalent-tag-p
                                     :weakness 'value)))
-    (doc-mode-fold-all t)
-    (font-lock-remove-keywords nil doc-mode-keywords)
-    (kill-local-variable 'doc-mode-overlay-map))
+    (doc-mode-unfold-all)
+    (font-lock-remove-keywords nil doc-mode-keywords))
   (when font-lock-mode
     (font-lock-fontify-buffer)))
 
@@ -200,16 +262,9 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
   "Remove the documentation for TAG, or the appropriate tag at point."
   (interactive)
   (unless tag (setq tag (or (doc-mode-current-tag) (error "No tag found"))))
-  ;; try if we find an overlay
-  (let ((overlay (gethash tag doc-mode-overlay-map)))
-    (if (not (and overlay (overlay-buffer overlay)))
-        ;; no overlay, find manually
-        (let ((bounds (doc-mode-find-doc-bounds (semantic-tag-start tag))))
-          (when bounds
-            (delete-region (plist-get bounds :beg) (plist-get bounds :end))))
-      (delete-region (overlay-start overlay)
-                     (overlay-end overlay))
-      (delete-overlay overlay))))
+  (let ((bounds (doc-mode-find-doc-bounds (semantic-tag-start tag))))
+    (when bounds
+      (delete-region (plist-get bounds :beg) (plist-get bounds :end)))))
 
 (defun doc-mode-add ()
   (interactive)
@@ -227,7 +282,8 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
 (global-set-key "\C-c\C-d" 'doc-mode-add)
 (define-key c-mode-base-map "\C-c\C-d" nil)
 
-(global-set-key "\C-c\C-t" 'doc-mode-fold-all)
+(global-set-key "\C-c\t" 'doc-mode-fold-all)
+(global-set-key "\C-c\C-t" 'doc-mode-toggle-tag-folding)
 
 
 
