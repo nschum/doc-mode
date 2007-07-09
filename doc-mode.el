@@ -44,6 +44,8 @@
 ;;     (or tag (semantic-current-tag-of-class 'function)
 ;;         (semantic-current-tag-of-class 'type))))
 
+;;; insertion ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (setq doc-mode-template-begin "/**")
 (setq doc-mode-template-end " */")
 (setq doc-mode-template-continue " * ")
@@ -51,24 +53,40 @@
 (setq doc-mode-single-begin "/** ")
 (setq doc-mode-single-end " */")
 
-;; (setq doc-mode-overlay-map (make-hash-table :test 'equal))
-;; (hash-table-test doc-mode-overlay-map)
+(defun doc-mode-insert (lines indent)
+  "Insert a documentation at point.
+LINES is a list of strings.  INDENT determines the offset."
+  (if (< (current-column) indent)
+      (indent-to-column indent)
+    (move-to-column indent t))
+  (if (not (consp lines))
+      (insert doc-mode-single-begin lines doc-mode-single-end ?\n)
+    (insert doc-mode-template-begin "\n")
+    (indent-to-column indent)
+    (dolist (line lines)
+      (insert doc-mode-template-continue line "\n")
+      (indent-to-column indent))
+    (insert doc-mode-template-end ?\n)))
 
-;; (maphash (lambda (x y) (message "%s->%s" x y)) doc-mode-overlay-map)
+(defun doc-mode-remove-doc (point)
+  "Remove the documentation before POINT."
+  (let* ((bounds (doc-mode-find-doc-bounds point))
+         (beg (plist-get bounds :beg))
+         (end (plist-get bounds :end)))
+    (when bounds
+      (save-excursion
+        (goto-char beg)
+        (incf beg (skip-chars-backward " \t"))
+        (goto-char end)
+        (incf end (skip-chars-forward " \t"))
+        (when (eolp) (incf end))
+        (delete-region beg end)))))
 
-(defun doc-mode-insert (tag column)
-  ;; insert new doc
-  (let ((lines (doc-mode-format-tag tag))
-        (beg (point)))
-    (indent-to-column column)
-    (if (not (cdr lines))
-        (insert doc-mode-single-begin (car lines) doc-mode-single-end "\n")
-      (insert doc-mode-template-begin "\n")
-      (indent-to-column column)
-      (dolist (line lines )
-        (insert doc-mode-template-continue line "\n")
-        (indent-to-column column))
-      (insert doc-mode-template-end "\n"))))
+(defun doc-mode-remove-tag-doc (tag)
+  "Remove the documentation for TAG.
+If called interactively, use the tag given by `doc-mode-current-tag'."
+  (interactive (list (or (doc-mode-current-tag) (error "No tag found"))))
+  (doc-mode-remove-doc (semantic-tag-start tag)))
 
 ;;; registering ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -97,7 +115,7 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
           ;; check if this is actually right before POS
           (skip-chars-forward " \t\n\r" pos)
           (when (eq pos (point))
-            `(:beg ,beg :end ,(1+ end) :column ,col)))))))
+            `(:beg ,beg :end ,end :column ,col)))))))
 
 ;;; formating ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -117,7 +135,6 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
            (semantic-tag-get-attribute tag :arguments))
    `(,(doc-mode-markup "return" "The return value"))
    ))
-;;   (insert (semantic-tag-name tag)))
 
 ;;; extracting ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -163,9 +180,9 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
         (setq doc-mode-folds (append doc-mode-folds siblings))))))
 
 (defun doc-mode-fold-tag-doc (tag)
-  "Fold TAG's documentation.
+  "Fold the documentation for TAG.
 If called interactively, use the tag given by `doc-mode-current-tag'."
-  (interactive (list (doc-mode-current-tag)))
+  (interactive (list (or (doc-mode-current-tag) (error "No tag found"))))
   (doc-mode-fold-doc (semantic-tag-start tag)))
 
 (defun doc-mode-unfold-by-overlay (overlay)
@@ -201,9 +218,9 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
         anything-done))))
 
 (defun doc-mode-unfold-tag-doc (tag)
-  "Unfold TAG's documentation.
+  "Unfold the documentation for TAG.
 If called interactively, use the tag given by `doc-mode-current-tag'."
-  (interactive (list (doc-mode-current-tag)))
+  (interactive (list (or (doc-mode-current-tag) (error "No tag found"))))
   (doc-mode-unfold-doc (semantic-tag-start tag)))
 
 ;;; all
@@ -258,31 +275,21 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun doc-mode-remove (&optional tag)
-  "Remove the documentation for TAG, or the appropriate tag at point."
-  (interactive)
-  (unless tag (setq tag (or (doc-mode-current-tag) (error "No tag found"))))
-  (let ((bounds (doc-mode-find-doc-bounds (semantic-tag-start tag))))
-    (when bounds
-      (delete-region (plist-get bounds :beg) (plist-get bounds :end)))))
-
 (defun doc-mode-add ()
   (interactive)
   (let ((tag (or (doc-mode-current-tag) (error "No tag found")))
         column)
     (save-excursion
       (goto-char (or (semantic-tag-start tag) (error "No tag found")))
-      (doc-mode-remove tag)
       (setq column (current-column))
+      (doc-mode-remove tag)
       (skip-chars-backward " \t" (point-at-bol))
-      (doc-mode-insert tag column))
-;;       (goto-char (point-at-bol))
-      ))
+      (doc-mode-insert (doc-mode-format-tag tag) column))))
 
 (global-set-key "\C-c\C-d" 'doc-mode-add)
 (define-key c-mode-base-map "\C-c\C-d" nil)
 
-(global-set-key "\C-c\t" 'doc-mode-fold-all)
+(global-set-key "\C-ct" 'doc-mode-fold-all)
 (global-set-key "\C-c\C-t" 'doc-mode-toggle-tag-folding)
 
 
