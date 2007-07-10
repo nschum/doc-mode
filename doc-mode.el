@@ -32,6 +32,8 @@
 ;;
 ;;; Code:
 
+(eval-when-compile (require 'cl))
+
 ;; semantic-after-auto-parse-hooks
 
 (defun doc-mode-current-tag ()
@@ -222,10 +224,10 @@ argument value) or (keyword argument)."
         (push (list keyword (match-string 3 str)) results)))
     (nreverse results)))
 
-(defun doc-mode-extract-keyword (keyword beg end)
+(defun doc-mode-filter-keyword (keyword keywords)
   (let (results)
-    (dolist (k (doc-mode-extract-keywords beg end))
-      (when (string= (car k) keyword)
+    (dolist (k keywords)
+      (when (and (consp k) (string= (car k) keyword))
         (push k results)))
     (nreverse results)))
 
@@ -262,7 +264,7 @@ Returns (length LIST) if no occurrence was found."
   (let ((lists (make-vector (1+ (length doc-mode-keyword-order)) nil))
         description)
     ;; skip summary
-    (when (not (consp (car keywords))) (push (pop keywords) description))
+    (while (not (listp (car keywords))) (push (pop keywords) description))
     (dolist (k keywords)
       (push k (elt lists (doc-mode-position (car k) doc-mode-keyword-order))))
     (let ((i (length lists)) result)
@@ -272,6 +274,16 @@ Returns (length LIST) if no occurrence was found."
                             result)))
       (nconc description result))))
 
+(defun doc-mode-missing-parameters (keywords tag)
+  (let ((parameters (mapcar 'cadr (doc-mode-filter-keyword "param" keywords)))
+        result)
+    (dolist (k (mapcar 'semantic-tag-name
+                       (semantic-tag-get-attribute tag :arguments)))
+      (unless (member k parameters)
+        (push (list "param" k "A value.") result)))
+;;         (push (doc-mode-markup "param" k "A value.") result)))
+    result))
+
 (defun doc-mode-fix-tag-doc (tag)
   (interactive (list (or (doc-mode-current-tag) (error "No tag found"))))
   (let ((bounds (doc-mode-find-doc-bounds (semantic-tag-start tag))))
@@ -279,14 +291,17 @@ Returns (length LIST) if no occurrence was found."
         (doc-mode-add tag)
       (let* ((beg (plist-get bounds :beg))
              (end (plist-get bounds :end))
-             (keywords (doc-mode-sort-keywords
-                        (doc-mode-extract-keywords beg end) tag)))
+             (keywords (doc-mode-extract-keywords beg end)))
+        (setq keywords (nconc keywords
+                              (doc-mode-missing-parameters keywords tag)))
         (doc-mode-remove tag)
         (save-excursion
           (goto-char (semantic-tag-start tag))
           (skip-chars-backward " \t" (point-at-bol))
-          (doc-mode-insert (doc-mode-format-keyword-list keywords)
-                           (plist-get bounds :column)))))))
+          (doc-mode-insert
+           (doc-mode-format-keyword-list
+            (doc-mode-sort-keywords keywords tag))
+           (plist-get bounds :column)))))))
 
 ;;; folding ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
