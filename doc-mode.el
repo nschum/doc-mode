@@ -37,12 +37,6 @@
 (defun doc-mode-current-tag ()
   (or (semantic-current-tag-of-class 'function)
       (semantic-current-tag-of-class 'type)))
-;;   (let ((overlays (overlays-at (point)))
-;;         tag)
-;;     (while (and overlays (null tag))
-;;       (setq tag (overlay-get (pop overlays) 'doc-mode)))
-;;     (or tag (semantic-current-tag-of-class 'function)
-;;         (semantic-current-tag-of-class 'type))))
 
 ;;; insertion ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -52,6 +46,28 @@
 
 (setq doc-mode-single-begin "/** ")
 (setq doc-mode-single-end " */")
+
+;; nil means use comment-fill-column
+(setq doc-mode-fill-column nil)
+
+(setq doc-mode-align-descriptions t)
+
+(setq doc-mode-keywords-with-argument-regexp
+      (eval-when-compile
+        (concat "\\([@\\]" (regexp-opt '("param"))
+                "\\>\\)\\(?:\\s +\\(\\sw\\)+\\)?")))
+
+(setq doc-mode-keyword-order '("param" "return"))
+
+(defconst doc-mode-keywords-with-parameter '("param"))
+
+(defun doc-mode-line-indent (line)
+  "Determine left side offset when indenting LINE."
+  (if (string-match doc-mode-keywords-with-argument-regexp line)
+      (1+ (- (match-end 0) (match-beginning 0)))
+    (if (string-match "[@\\][^ \t]+" line)
+        (match-end 0)
+      0)))
 
 (defun doc-mode-insert (lines indent)
   "Insert a documentation at point.
@@ -64,7 +80,16 @@ LINES is a list of strings.  INDENT determines the offset."
     (insert doc-mode-template-begin "\n")
     (indent-to-column indent)
     (dolist (line lines)
-      (insert doc-mode-template-continue line "\n")
+      (let ((beg (point))
+            (fill-column (or doc-mode-fill-column comment-fill-column
+                             fill-column))
+            (fill-prefix
+             (when doc-mode-align-descriptions
+               (concat (buffer-substring (point-at-bol) (point))
+                       doc-mode-template-continue
+                       (make-string (doc-mode-line-indent line) ? )))))
+        (insert doc-mode-template-continue line "\n")
+        (fill-region beg (point) 'left))
       (indent-to-column indent))
     (insert doc-mode-template-end ?\n)))
 
@@ -124,8 +149,6 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
           (when argument " ") argument
           (when description " ") description))
 
-(mapcar 'semantic-tag-name (semantic-tag-get-attribute xxx :arguments))
-
 (defun doc-mode-format-tag (tag)
   (append
    `("One line brief documentation.")
@@ -133,15 +156,27 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
              (doc-mode-markup "param" (semantic-tag-name argument)
                               "A value."))
            (semantic-tag-get-attribute tag :arguments))
-   `(,(doc-mode-markup "return" "The return value"))
-   ))
+   (unless (equal (semantic-tag-type tag) "void")
+     `(,(doc-mode-markup "return" "The return value")))))
+
+(defun doc-mode-format-keyword-list (keywords)
+  (let ((summary (unless (consp (car keywords)) (pop keywords)))
+        (lines (mapcar (lambda (k)
+                         (doc-mode-markup (car k) (cadr k) (car (cddr k))))
+                       keywords)))
+    (if (and summary
+             (string-match "\\`\\([^.]*\\.\\)[ \t]*\\(.*\\)\\'" summary))
+        (cons (match-string 1 summary)
+              (if (eq (match-beginning 2) (match-end 2))
+                  lines
+                (cons (match-string 2 summary) lines)))
+      lines)))
 
 ;;; extracting ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun doc-mode-extract-brief (beg end)
-  (buffer-substring-no-properties
-   (car (doc-mode-find-summary beg end))
-   (cdr (doc-mode-find-summary beg end))))
+(defun doc-mode-extract-summary (beg end)
+  (let ((bounds (doc-mode-find-summary beg end)))
+    (buffer-substring-no-properties (car bounds) (cdr bounds))))
 
 (defun doc-mode-find-summary (beg end)
   (let ((str (buffer-substring-no-properties beg end)))
@@ -150,11 +185,108 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
       (string-match "[^ \t\n\r*/][^\r\n]*\n" str)
       (cons (+ (match-beginning 0) beg) (+ (match-end 0) beg)))))
 
+;; TODO: maybe use `c-mask-paragraph'
+(defun doc-mode-clean-doc (beg end)
+  "Remove the comment delimiters between BEG and END."
+  (let (result)
+    (save-excursion
+      (goto-char beg)
+      (when (looking-at "[ \t\n\r]*/\\*")
+        (goto-char (match-end 0)))
+      (while (re-search-forward "[ \t]*\\*[ \t]*\\(.*\\)*?[ \t]*\\(\\*/\\|\n\\)"
+                                end t)
+        (setq result (concat result (match-string-no-properties 1) "\n")))
+      result)))
+
+(defun doc-mode-extract-keywords (beg end)
+  "Extract documentation keywords between BEG and END.
+Returns a alist of keywords, where each element is the list (keyword
+argument value) or (keyword argument)."
+  (let ((str (replace-regexp-in-string "\n" " " 
+                                       (doc-mode-clean-doc beg end)))
+        pos results keyword parameter)
+    (when (setq pos (string-match "[ \t]+\\(.*?\\)[ \t]+[@\\]\\sw" str))
+      (push (match-string 1 str) results))
+    (while (setq pos (string-match
+                      (concat "\\([@\\]\\)\\(.+?\\>\\)\\s +\\(.*?\\)[ \t]*"
+                              "\\(\\1\\|\\'\\)") str pos))
+      (setq keyword (match-string 2 str))
+      (setq parameter (match-string 3 str))
+      (setq pos (1- (match-end 0)))
+      (if (member keyword doc-mode-keywords-with-parameter)
+          (let ((parameter (split-string parameter nil t)))
+            (push (list keyword (car parameter)
+                        (mapconcat 'identity (cdr parameter) " "))
+                  results))
+        ;; no argument
+        (push (list keyword (match-string 3 str)) results)))
+    (nreverse results)))
+
+(defun doc-mode-extract-keyword (keyword beg end)
+  (let (results)
+    (dolist (k (doc-mode-extract-keywords beg end))
+      (when (string= (car k) keyword)
+        (push k results)))
+    (nreverse results)))
+
 (defun doc-mode-find-eligible-tags ()
   (let ((tags (semantic-brute-find-tag-by-function
                (lambda (tag) (memq (semantic-tag-class tag) '(type function)))
                (semanticdb-file-stream (buffer-file-name)))))
     (nconc (mapcan 'semantic-tag-components tags) tags)))
+
+;;; checking ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defsubst doc-mode-position (element list)
+  "Return the first position of ELEMENT in LIST.
+Returns (length LIST) if no occurrence was found."
+  (let ((pos 0))
+    (while (and list (not (equal element (pop list))))
+      (incf pos))
+    pos))
+
+(defun doc-mode-keyword< (a b tag)
+  (if (equal (car a) "param")
+      (let* ((args (mapcar 'semantic-tag-name
+                          (semantic-tag-get-attribute tag :arguments)))
+             (a-param (cadr a))
+             (b-param (cadr b))
+             (a-pos (doc-mode-position a-param args))
+             (b-pos (doc-mode-position b-param args)))
+        (if (= a-pos b-pos) 
+             (string< a-param b-param)
+          (< a-pos b-pos)))
+    (string< (cadr a) (cadr b))))
+
+(defun doc-mode-sort-keywords (keywords tag)
+  (let ((lists (make-vector (1+ (length doc-mode-keyword-order)) nil))
+        description)
+    ;; skip summary
+    (when (not (consp (car keywords))) (push (pop keywords) description))
+    (dolist (k keywords)
+      (push k (elt lists (doc-mode-position (car k) doc-mode-keyword-order))))
+    (let ((i (length lists)) result)
+      (while (> i 0)
+        (setq result (nconc (sort (elt lists (decf i))
+                                  (lambda (a b) (doc-mode-keyword< a b tag)))
+                            result)))
+      (nconc description result))))
+
+(defun doc-mode-fix-tag-doc (tag)
+  (interactive (list (or (doc-mode-current-tag) (error "No tag found"))))
+  (let ((bounds (doc-mode-find-doc-bounds (semantic-tag-start tag))))
+    (if (null bounds)
+        (doc-mode-add tag)
+      (let* ((beg (plist-get bounds :beg))
+             (end (plist-get bounds :end))
+             (keywords (doc-mode-sort-keywords
+                        (doc-mode-extract-keywords beg end) tag)))
+        (doc-mode-remove tag)
+        (save-excursion
+          (goto-char (semantic-tag-start tag))
+          (skip-chars-backward " \t" (point-at-bol))
+          (doc-mode-insert (doc-mode-format-keyword-list keywords)
+                           (plist-get bounds :column)))))))
 
 ;;; folding ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -275,13 +407,11 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun doc-mode-add ()
-  (interactive)
-  (let ((tag (or (doc-mode-current-tag) (error "No tag found")))
-        column)
-    (save-excursion
-      (goto-char (or (semantic-tag-start tag) (error "No tag found")))
-      (setq column (current-column))
+(defun doc-mode-add (tag)
+  (interactive (list (or (doc-mode-current-tag) (error "No tag found"))))
+  (save-excursion
+    (goto-char (or (semantic-tag-start tag) (error "No tag found")))
+    (let ((column (current-column)))
       (doc-mode-remove tag)
       (skip-chars-backward " \t" (point-at-bol))
       (doc-mode-insert (doc-mode-format-tag tag) column))))
