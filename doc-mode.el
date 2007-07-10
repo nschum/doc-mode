@@ -34,10 +34,13 @@
 
 (eval-when-compile (require 'cl))
 
+(push "^No tag found$" debug-ignored-errors)
+
 ;; semantic-after-auto-parse-hooks
 
 (defun doc-mode-current-tag ()
   (or (semantic-current-tag-of-class 'function)
+      (semantic-current-tag-of-class 'variable)
       (semantic-current-tag-of-class 'type)))
 
 ;;; insertion ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -48,6 +51,9 @@
 
 (setq doc-mode-single-begin "/** ")
 (setq doc-mode-single-end " */")
+
+(setq doc-mode-allow-single-line-comments t)
+(setq doc-mode-fold-single-line-comments nil)
 
 ;; nil means use comment-fill-column
 (setq doc-mode-fill-column nil)
@@ -77,8 +83,8 @@ LINES is a list of strings.  INDENT determines the offset."
   (if (< (current-column) indent)
       (indent-to-column indent)
     (move-to-column indent t))
-  (if (not (consp lines))
-      (insert doc-mode-single-begin lines doc-mode-single-end ?\n)
+  (if (and (not (cdr lines)) doc-mode-allow-single-line-comments)
+      (insert doc-mode-single-begin (car lines) doc-mode-single-end ?\n)
     (insert doc-mode-template-begin "\n")
     (indent-to-column indent)
     (dolist (line lines)
@@ -91,7 +97,7 @@ LINES is a list of strings.  INDENT determines the offset."
                        doc-mode-template-continue
                        (make-string (doc-mode-line-indent line) ? )))))
         (insert doc-mode-template-continue line "\n")
-        (fill-region beg (point) 'left))
+        (fill-region beg (point) 'left t))
       (indent-to-column indent))
     (insert doc-mode-template-end ?\n)))
 
@@ -155,10 +161,10 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
   (append
    `("One line brief documentation.")
    (mapcar (lambda (argument)
-             (doc-mode-markup "param" (semantic-tag-name argument)
-                              "A value."))
+             (doc-mode-markup "param" (semantic-tag-name argument) ""))
            (semantic-tag-get-attribute tag :arguments))
-   (unless (equal (semantic-tag-type tag) "void")
+   (unless (or (not (eq (semantic-tag-class tag) 'function))
+               (equal (semantic-tag-type tag) "void"))
      `(,(doc-mode-markup "return" "The return value")))))
 
 (defun doc-mode-format-keyword-list (keywords)
@@ -184,8 +190,8 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
   (let ((str (buffer-substring-no-properties beg end)))
     (if (string-match "^[@\\]brief \\([^\r\n]+\n\\)" str)
         (cons (+ (match-beginning 1) beg) (+ (match-end 1) beg))
-      (string-match "[^ \t\n\r*/][^\r\n]*\n" str)
-      (cons (+ (match-beginning 0) beg) (+ (match-end 0) beg)))))
+      (string-match "\\([^ \t\n\r*/][^\r\n]*?\\)[ \t]*\\(\n\\|\\*/\\)" str)
+      (cons (+ (match-beginning 1) beg) (+ (match-end 1) beg)))))
 
 ;; TODO: maybe use `c-mask-paragraph'
 (defun doc-mode-clean-doc (beg end)
@@ -207,7 +213,9 @@ argument value) or (keyword argument)."
   (let ((str (replace-regexp-in-string "\n" " " 
                                        (doc-mode-clean-doc beg end)))
         pos results keyword parameter)
-    (when (setq pos (string-match "[ \t]+\\(.*?\\)[ \t]+[@\\]\\sw" str))
+    (when (setq pos (string-match (concat "\\`[ \t]*\\(.*?\\)[ \t]*"
+                                          "\\([@\\]\\sw\\|\\'\\)")
+                                  str))
       (push (match-string 1 str) results))
     (while (setq pos (string-match
                       (concat "\\([@\\]\\)\\(.+?\\>\\)\\s +\\(.*?\\)[ \t]*"
@@ -281,7 +289,15 @@ Returns (length LIST) if no occurrence was found."
                        (semantic-tag-get-attribute tag :arguments)))
       (unless (member k parameters)
         (push (list "param" k "A value.") result)))
-;;         (push (doc-mode-markup "param" k "A value.") result)))
+    result))
+
+(defun doc-mode-invalid-parameters (keywords tag)
+  (let ((parameters (mapcar 'semantic-tag-name
+                            (semantic-tag-get-attribute tag :arguments)))
+        result)
+    (dolist (k (doc-mode-filter-keyword "param" keywords))
+      (unless (member (cadr k) parameters)
+        (push k result)))
     result))
 
 (defun doc-mode-fix-tag-doc (tag)
@@ -291,9 +307,13 @@ Returns (length LIST) if no occurrence was found."
         (doc-mode-add tag)
       (let* ((beg (plist-get bounds :beg))
              (end (plist-get bounds :end))
-             (keywords (doc-mode-extract-keywords beg end)))
-        (setq keywords (nconc keywords
-                              (doc-mode-missing-parameters keywords tag)))
+             (keywords (doc-mode-extract-keywords beg end))
+             (missing (doc-mode-missing-parameters keywords tag))
+             (invalid (doc-mode-invalid-parameters keywords tag)))
+        (if (= (length missing) (length invalid))
+            (while missing
+              (setcar (cdr (pop invalid)) (cadr (pop missing))))
+          (setq keywords (nconc keywords missing)))
         (doc-mode-remove tag)
         (save-excursion
           (goto-char (semantic-tag-start tag))
@@ -302,6 +322,26 @@ Returns (length LIST) if no occurrence was found."
            (doc-mode-format-keyword-list
             (doc-mode-sort-keywords keywords tag))
            (plist-get bounds :column)))))))
+
+(defun doc-mode-check-tag-doc (tag)
+  (let ((bounds (doc-mode-find-doc-bounds (semantic-tag-start tag))))
+    (if bounds
+        (let* ((beg (plist-get bounds :beg))
+               (end (plist-get bounds :end))
+               (keywords (doc-mode-extract-keywords beg end))
+               (missing (doc-mode-missing-parameters keywords tag))
+               (invalid (doc-mode-invalid-parameters keywords tag)))
+          (or (and missing 'missing)
+              (and invalid 'invalid)))
+      'none)))
+
+(defun doc-mode-check-buffer ()
+  (interactive)
+  (let ((tags (doc-mode-find-eligible-tags)) invalid)
+    (while tags
+      (when (doc-mode-check-tag-doc (pop tags))
+        (setq invalid t tags nil)))
+    invalid))
 
 ;;; folding ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -318,13 +358,15 @@ Returns (length LIST) if no occurrence was found."
              (before-overlay (make-overlay beg (car summary-bounds)))
              (after-overlay (make-overlay (cdr summary-bounds) end))
              (siblings (list before-overlay after-overlay)))
-        (dolist (ov siblings)
-          (overlay-put ov 'invisible t)
-          (overlay-put ov 'isearch-open-invisible-temporary
-                       'doc-mode-unfold-by-overlay-temporary)
-          (overlay-put ov 'isearch-open-invisible 'doc-mode-unfold-by-overlay)
-          (overlay-put ov 'doc-mode-fold siblings))
-        (setq doc-mode-folds (append doc-mode-folds siblings))))))
+        (when (or doc-mode-fold-single-line-comments
+                  (> (count-lines beg end) 1))
+          (dolist (ov siblings)
+            (overlay-put ov 'invisible t)
+            (overlay-put ov 'isearch-open-invisible-temporary
+                         'doc-mode-unfold-by-overlay-temporary)
+            (overlay-put ov 'isearch-open-invisible 'doc-mode-unfold-by-overlay)
+            (overlay-put ov 'doc-mode-fold siblings))
+          (setq doc-mode-folds (nconc doc-mode-folds siblings)))))))
 
 (defun doc-mode-fold-tag-doc (tag)
   "Fold the documentation for TAG.
@@ -431,7 +473,7 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
       (skip-chars-backward " \t" (point-at-bol))
       (doc-mode-insert (doc-mode-format-tag tag) column))))
 
-(global-set-key "\C-c\C-d" 'doc-mode-add)
+(global-set-key "\C-c\C-d" 'doc-mode-fix-tag-doc)
 (define-key c-mode-base-map "\C-c\C-d" nil)
 
 (global-set-key "\C-ct" 'doc-mode-fold-all)
