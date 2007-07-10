@@ -323,25 +323,57 @@ Returns (length LIST) if no occurrence was found."
             (doc-mode-sort-keywords keywords tag))
            (plist-get bounds :column)))))))
 
+(defun doc-mode-format-message (type &optional parameters)
+  (if (eq type 'none)
+      "No documentation:"
+    (when parameters
+      (concat (case type
+                ('missing "Missing")
+                ('invalid "Invalid"))
+              " parameter" (when (cdr parameters) "s") ": "
+              (mapconcat 'identity (mapcar 'cadr parameters) ", ")))))
+
+
 (defun doc-mode-check-tag-doc (tag)
   (let ((bounds (doc-mode-find-doc-bounds (semantic-tag-start tag))))
     (if bounds
         (let* ((beg (plist-get bounds :beg))
                (end (plist-get bounds :end))
                (keywords (doc-mode-extract-keywords beg end))
-               (missing (doc-mode-missing-parameters keywords tag))
-               (invalid (doc-mode-invalid-parameters keywords tag)))
-          (or (and missing 'missing)
-              (and invalid 'invalid)))
-      'none)))
+               (missing (doc-mode-format-message 'missing
+                                                 (doc-mode-missing-parameters
+                                                  keywords tag)))
+               (invalid (doc-mode-format-message 'invalid
+                                                 (doc-mode-invalid-parameters
+                                                  keywords tag))))
+          (or (and invalid missing
+                   (concat invalid "\n" missing))
+              invalid
+              missing))
+      (doc-mode-format-message 'none))))
+
+(defun doc-mode-first-faulty-tag-doc ()
+  (let ((tags (doc-mode-find-eligible-tags)) invalid)
+    (while tags
+      (if (setq invalid (doc-mode-check-tag-doc (car tags)))
+          (setq invalid (cons (car tags) invalid) tags nil)
+        (pop tags)))
+    invalid))
 
 (defun doc-mode-check-buffer ()
   (interactive)
-  (let ((tags (doc-mode-find-eligible-tags)) invalid)
-    (while tags
-      (when (doc-mode-check-tag-doc (pop tags))
-        (setq invalid t tags nil)))
-    invalid))
+  (let ((invalid-p (doc-mode-first-faulty-tag-doc)))
+    (setq doc-mode-lighter (if invalid-p " doc!" " doc"))
+    invalid-p))
+
+(defun doc-mode-next-faulty-doc ()
+  "Jump to the next faulty documentation and print error."
+  (interactive)
+  (let ((tag (doc-mode-first-faulty-tag-doc)))
+    (if (null tag)
+        (message "No faulty doc found")
+      (goto-char (semantic-tag-start (car tag)))
+      (message "%s" (cdr tag)))))
 
 ;;; folding ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -449,9 +481,11 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
 
 ;;; mode ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defvar doc-mode-lighter " doc")
+
 (define-minor-mode doc-mode
   "Minor mode for editing in-code documentation."
-  nil " doc" nil
+  nil doc-mode-lighter nil
   (if doc-mode
       (progn (font-lock-add-keywords nil doc-mode-keywords)
              (setq doc-mode-overlay-map
