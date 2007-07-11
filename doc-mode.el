@@ -46,7 +46,7 @@
   (save-excursion
     (or (semantic-current-tag-of-class 'function)
         (semantic-current-tag-of-class 'variable)
-        (progn (skip-chars-forward " \t\n") nil)
+        (progn (beginning-of-line) (skip-chars-forward " \t\n") nil)
         (semantic-current-tag-of-class 'function)
         (semantic-current-tag-of-class 'variable)
         (if (not (looking-at "/\\*\\*"))
@@ -218,7 +218,6 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
       (string-match "\\([^ \t\n\r*/][^\r\n]*?\\)[ \t]*\\(\n\\|\\*/\\)" str)
       (cons (+ (match-beginning 1) beg) (+ (match-end 1) beg)))))
 
-;; TODO: maybe use `c-mask-paragraph'
 (defun doc-mode-clean-doc (beg end)
   "Remove the comment delimiters between BEG and END."
   (let (result)
@@ -231,17 +230,19 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
         (setq result (concat result (match-string-no-properties 1) "\n")))
       result)))
 
-;; (string-match "aa\nbb" "aa\nbb")
-(split-string "aaa\nbbb\n\n\nccc\nddd@e" "\n")
-
 (defun doc-mode-extract-keywords (beg end)
   "Extract documentation keywords between BEG and END.
 Returns a alist of keywords, where each element is the list (keyword
 argument value) or (keyword argument)."
-  (let* ((doc (doc-mode-clean-doc beg end))
-         (paragraphs (if (string-match "\\(\\(.\\|\n\\)*?\\)[@\\]\\<" doc)
-                         (match-string 1 doc) doc))
+  (let* ((paragraphs (doc-mode-clean-doc beg end))
+         (doc "")
          match pos results)
+
+    (when (string-match "\\(\\(.\\|\n\\)*?\\)\\([@\\]\\<\\(.\\|\n\\)*\\'\\)"
+                        paragraphs)
+      (setq doc (match-string-no-properties 3 paragraphs)
+            paragraphs (match-string-no-properties 1 paragraphs)))
+
     ;; first line summary
     (when (string-match "\\`[ \t\n]*\\(.+\\.\\)[ \n]" paragraphs)
       (push (match-string 1 paragraphs) results)
@@ -252,23 +253,14 @@ argument value) or (keyword argument)."
                                      "[ \t]*\n\\(\n+[ \t]*\\|$\\)" t))
       (push (replace-regexp-in-string "[\n\r]" " " paragraph) results))
 
-    (setq doc (replace-regexp-in-string "[\n\r]" " " doc))
 
-    (while (string-match
-            (concat "\\([@\\]\\)\\(.+?\\>\\)\\s +\\(.*?\\)[ \t\n]*"
-                    "\\(\\1\\|\\'\\)") doc pos)
-      (match-string 0 doc)
-      (setq keyword (match-string 2 doc))
-      (setq parameter (match-string 3 doc))
-      (setq pos (1- (match-end 0)))
-      (if (member keyword doc-mode-keywords-with-parameter)
-          (let ((parameter (split-string parameter nil t)))
-            (push (list keyword (car parameter)
-                        (mapconcat 'identity (cdr parameter) " "))
-                  results))
-        ;; no argument
-        (push (list keyword (match-string 3 doc)) results))
-      )
+    (dolist (keyword (cdr (split-string doc "[@\\]\\<")))
+      (setq match (split-string keyword))
+      (push (if (member (car match) doc-mode-keywords-with-parameter)
+                (list (car match) (cadr match)
+                      (mapconcat 'identity (cddr match) " "))
+              (list (car match) (mapconcat 'identity (cdr match) " ")))
+            results))
     (nreverse results)))
 
 (defun doc-mode-filter-keyword (keyword keywords)
@@ -279,10 +271,16 @@ argument value) or (keyword argument)."
     (nreverse results)))
 
 (defun doc-mode-find-eligible-tags ()
-  (let ((tags (semantic-brute-find-tag-by-function
-               (lambda (tag) (memq (semantic-tag-class tag) '(type function)))
-               (semanticdb-file-stream (buffer-file-name)))))
-    (nconc (mapcan 'semantic-tag-components tags) tags)))
+  (let (tags)
+    (semantic-brute-find-tag-by-function
+     (lambda (tag)
+       (case (semantic-tag-class tag)
+         ((function variable) (push tag tags))
+         (type (setq tags
+                     (nconc (semantic-tag-type-members tag)
+                            tags)))))
+     (semanticdb-file-stream (buffer-file-name)))
+    tags))
 
 ;;; checking ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
