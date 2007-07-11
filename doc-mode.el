@@ -43,9 +43,23 @@
   (when (semantic-parse-tree-needs-update-p)
     ;; TODO: should be (bovinate -1), but error in semantic pre4
     (semantic-fetch-tags))
-  (or (semantic-current-tag-of-class 'function)
-      (semantic-current-tag-of-class 'variable)
-      (semantic-current-tag-of-class 'type)))
+  (save-excursion
+    (or (semantic-current-tag-of-class 'function)
+        (semantic-current-tag-of-class 'variable)
+        (progn (skip-chars-forward " \t\n") nil)
+        (semantic-current-tag-of-class 'function)
+        (semantic-current-tag-of-class 'variable)
+        (if (not (looking-at "/\\*\\*"))
+            (semantic-current-tag-of-class 'type)
+          (progn (search-forward "*/" nil t)
+                 (skip-chars-forward " \t\n")
+                 nil))
+        (semantic-current-tag-of-class 'function)
+        (semantic-current-tag-of-class 'variable)
+        (semantic-current-tag-of-class 'type))))
+
+(defun doc-mode-current-tag-or-bust ()
+  (or (doc-mode-current-tag) (error "No tag found")))
 
 ;;; insertion ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -57,7 +71,7 @@
 (setq doc-mode-single-end " */")
 
 (setq doc-mode-allow-single-line-comments t)
-(setq doc-mode-fold-single-line-comments nil)
+(setq doc-mode-fold-single-line-comments t)
 
 ;; nil means use comment-fill-column
 (setq doc-mode-fill-column nil)
@@ -145,7 +159,7 @@ LINES is a list of strings.  INDENT determines the offset."
 (defun doc-mode-remove-tag-doc (tag)
   "Remove the documentation for TAG.
 If called interactively, use the tag given by `doc-mode-current-tag'."
-  (interactive (list (or (doc-mode-current-tag) (error "No tag found"))))
+  (interactive (list (doc-mode-current-tag-or-bust)))
   (doc-mode-remove-doc (semantic-tag-start tag)))
 
 ;;; registering ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -326,7 +340,7 @@ Returns (length LIST) if no occurrence was found."
     result))
 
 (defun doc-mode-fix-tag-doc (tag)
-  (interactive (list (or (doc-mode-current-tag) (error "No tag found"))))
+  (interactive (list (doc-mode-current-tag-or-bust)))
   (let ((bounds (doc-mode-find-doc-bounds (semantic-tag-start tag))))
     (if (null bounds)
         (doc-mode-add tag)
@@ -426,7 +440,7 @@ Returns (length LIST) if no occurrence was found."
 (defun doc-mode-fold-tag-doc (tag)
   "Fold the documentation for TAG.
 If called interactively, use the tag given by `doc-mode-current-tag'."
-  (interactive (list (or (doc-mode-current-tag) (error "No tag found"))))
+  (interactive (list (doc-mode-current-tag-or-bust)))
   (doc-mode-fold-doc (semantic-tag-start tag)))
 
 (defun doc-mode-unfold-by-overlay (overlay)
@@ -464,7 +478,7 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
 (defun doc-mode-unfold-tag-doc (tag)
   "Unfold the documentation for TAG.
 If called interactively, use the tag given by `doc-mode-current-tag'."
-  (interactive (list (or (doc-mode-current-tag) (error "No tag found"))))
+  (interactive (list (doc-mode-current-tag-or-bust)))
   (doc-mode-unfold-doc (semantic-tag-start tag)))
 
 ;;; all
@@ -486,7 +500,7 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
 (defun doc-mode-toggle-tag-folding (tag)
   "Toggle folding of TAG's documentation.
 If called interactively, use the tag given by `doc-mode-current-tag'."
-  (interactive (list (doc-mode-current-tag)))
+  (interactive (list (doc-mode-current-tag-or-bust)))
   (or (doc-mode-unfold-tag-doc tag)
       (doc-mode-fold-tag-doc tag)))
 
@@ -522,7 +536,7 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun doc-mode-add (tag)
-  (interactive (list (or (doc-mode-current-tag) (error "No tag found"))))
+  (interactive (list (doc-mode-current-tag-or-bust)))
   (save-excursion
     (goto-char (or (semantic-tag-start tag) (error "No tag found")))
     (let ((column (current-column)))
