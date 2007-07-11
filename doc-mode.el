@@ -37,8 +37,12 @@
 (push "^No tag found$" debug-ignored-errors)
 
 ;; semantic-after-auto-parse-hooks
+;; if parser-state ^, reparse or wait
 
 (defun doc-mode-current-tag ()
+  (when (semantic-parse-tree-needs-update-p)
+    ;; TODO: should be (bovinate -1), but error in semantic pre4
+    (semantic-fetch-tags))
   (or (semantic-current-tag-of-class 'function)
       (semantic-current-tag-of-class 'variable)
       (semantic-current-tag-of-class 'type)))
@@ -77,28 +81,51 @@
         (match-end 0)
       0)))
 
-(defun doc-mode-insert (lines indent)
+(defun doc-mode-insert-line (line indent)
+  (indent-to-column indent)
+  (let ((beg (point)))
+    (insert doc-mode-template-continue line)
+    (delete-char (- (skip-chars-backward " \t")))
+    (when (> (point) (+ beg 2))
+      (save-excursion (fill-region beg (point) 'left t)))
+    (insert "\n")))
+
+(defun doc-mode-insert (keywords indent)
   "Insert a documentation at point.
 LINES is a list of strings.  INDENT determines the offset."
   (if (< (current-column) indent)
       (indent-to-column indent)
     (move-to-column indent t))
-  (if (and (not (cdr lines)) doc-mode-allow-single-line-comments)
-      (insert doc-mode-single-begin (car lines) doc-mode-single-end ?\n)
+  (if (and (not (cdr keywords)) doc-mode-allow-single-line-comments)
+      (insert doc-mode-single-begin (car keywords) doc-mode-single-end ?\n)
     (insert doc-mode-template-begin "\n")
-    (indent-to-column indent)
-    (dolist (line lines)
-      (let ((beg (point))
-            (fill-column (or doc-mode-fill-column comment-fill-column
-                             fill-column))
-            (fill-prefix
-             (when doc-mode-align-descriptions
-               (concat (buffer-substring (point-at-bol) (point))
-                       doc-mode-template-continue
-                       (make-string (doc-mode-line-indent line) ? )))))
+
+    ;; first line
+    (when (stringp (car keywords))
+      (doc-mode-insert-line (pop keywords) indent))
+
+    (if (cdr keywords)
+        (while (stringp (car keywords))
+          (doc-mode-insert-line (pop keywords) indent)
+          (when (stringp (car keywords))
+            (doc-mode-insert-line "" indent)))
+      (while (stringp (car keywords))
+        (doc-mode-insert-line (pop keywords) indent)))
+
+    (while keywords
+      (indent-to-column indent)
+      (let* ((line (apply 'doc-mode-markup (pop keywords)))
+             (beg (point))
+             (fill-column (or doc-mode-fill-column comment-fill-column
+                              fill-column))
+             (fill-prefix
+              (when doc-mode-align-descriptions
+                (concat (buffer-substring (point-at-bol) (point))
+                        doc-mode-template-continue
+                        (make-string (doc-mode-line-indent line) ? )))))
         (insert doc-mode-template-continue line "\n")
-        (fill-region beg (point) 'left t))
-      (indent-to-column indent))
+        (fill-region beg (point) 'left t)))
+    (indent-to-column indent)
     (insert doc-mode-template-end ?\n)))
 
 (defun doc-mode-remove-doc (point)
@@ -140,10 +167,8 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
         (goto-char beg)
         (setq col (current-column))
         ;; move to beginning of line, if whitespace
-;;         (incf beg (skip-chars-backward " \t"))
         ;; search for end
         (when (search-forward "*/" nil t)
-;;           (skip-chars-forward " \t" (point-at-eol))
           (setq end (point))
           ;; check if this is actually right before POS
           (skip-chars-forward " \t\n\r" pos)
@@ -158,27 +183,13 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
           (when description " ") description))
 
 (defun doc-mode-format-tag (tag)
-  (append
-   `("One line brief documentation.")
-   (mapcar (lambda (argument)
-             (doc-mode-markup "param" (semantic-tag-name argument) ""))
-           (semantic-tag-get-attribute tag :arguments))
-   (unless (or (not (eq (semantic-tag-class tag) 'function))
-               (equal (semantic-tag-type tag) "void"))
-     `(,(doc-mode-markup "return" "The return value")))))
-
-(defun doc-mode-format-keyword-list (keywords)
-  (let ((summary (unless (consp (car keywords)) (pop keywords)))
-        (lines (mapcar (lambda (k)
-                         (doc-mode-markup (car k) (cadr k) (car (cddr k))))
-                       keywords)))
-    (if (and summary
-             (string-match "\\`\\([^.]*\\.\\)[ \t]*\\(.*\\)\\'" summary))
-        (cons (match-string 1 summary)
-              (if (eq (match-beginning 2) (match-end 2))
-                  lines
-                (cons (match-string 2 summary) lines)))
-      lines)))
+  `("<brief>." .
+    ,(nconc (mapcar (lambda (argument)
+                      (list "param" (semantic-tag-name argument) "<doc>"))
+                    (semantic-tag-get-attribute tag :arguments))
+            (unless (or (not (eq (semantic-tag-class tag) 'function))
+                        (equal (semantic-tag-type tag) "void"))
+              '(("return" "<doc>"))))))
 
 ;;; extracting ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -206,22 +217,35 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
         (setq result (concat result (match-string-no-properties 1) "\n")))
       result)))
 
+;; (string-match "aa\nbb" "aa\nbb")
+(split-string "aaa\nbbb\n\n\nccc\nddd@e" "\n")
+
 (defun doc-mode-extract-keywords (beg end)
   "Extract documentation keywords between BEG and END.
 Returns a alist of keywords, where each element is the list (keyword
 argument value) or (keyword argument)."
-  (let ((str (replace-regexp-in-string "\n" " " 
-                                       (doc-mode-clean-doc beg end)))
-        pos results keyword parameter)
-    (when (setq pos (string-match (concat "\\`[ \t]*\\(.*?\\)[ \t]*"
-                                          "\\([@\\]\\sw\\|\\'\\)")
-                                  str))
-      (push (match-string 1 str) results))
-    (while (setq pos (string-match
-                      (concat "\\([@\\]\\)\\(.+?\\>\\)\\s +\\(.*?\\)[ \t]*"
-                              "\\(\\1\\|\\'\\)") str pos))
-      (setq keyword (match-string 2 str))
-      (setq parameter (match-string 3 str))
+  (let* ((doc (doc-mode-clean-doc beg end))
+         (paragraphs (if (string-match "\\(\\(.\\|\n\\)*?\\)[@\\]\\<" doc)
+                         (match-string 1 doc) doc))
+         match pos results)
+    ;; first line summary
+    (when (string-match "\\`[ \t\n]*\\(.+\\.\\)[ \n]" paragraphs)
+      (push (match-string 1 paragraphs) results)
+      (setq pos (match-end 0)))
+
+    ;; other paragraphs
+    (dolist (paragraph (split-string (substring paragraphs pos)
+                                     "[ \t]*\n\\(\n+[ \t]*\\|$\\)" t))
+      (push (replace-regexp-in-string "[\n\r]" " " paragraph) results))
+
+    (setq doc (replace-regexp-in-string "[\n\r]" " " doc))
+
+    (while (string-match
+            (concat "\\([@\\]\\)\\(.+?\\>\\)\\s +\\(.*?\\)[ \t\n]*"
+                    "\\(\\1\\|\\'\\)") doc pos)
+      (match-string 0 doc)
+      (setq keyword (match-string 2 doc))
+      (setq parameter (match-string 3 doc))
       (setq pos (1- (match-end 0)))
       (if (member keyword doc-mode-keywords-with-parameter)
           (let ((parameter (split-string parameter nil t)))
@@ -229,7 +253,8 @@ argument value) or (keyword argument)."
                         (mapconcat 'identity (cdr parameter) " "))
                   results))
         ;; no argument
-        (push (list keyword (match-string 3 str)) results)))
+        (push (list keyword (match-string 3 doc)) results))
+      )
     (nreverse results)))
 
 (defun doc-mode-filter-keyword (keyword keywords)
@@ -271,8 +296,8 @@ Returns (length LIST) if no occurrence was found."
 (defun doc-mode-sort-keywords (keywords tag)
   (let ((lists (make-vector (1+ (length doc-mode-keyword-order)) nil))
         description)
-    ;; skip summary
-    (while (not (listp (car keywords))) (push (pop keywords) description))
+    ;; skip text
+    (while (stringp (car keywords)) (push (pop keywords) description))
     (dolist (k keywords)
       (push k (elt lists (doc-mode-position (car k) doc-mode-keyword-order))))
     (let ((i (length lists)) result)
@@ -280,7 +305,7 @@ Returns (length LIST) if no occurrence was found."
         (setq result (nconc (sort (elt lists (decf i))
                                   (lambda (a b) (doc-mode-keyword< a b tag)))
                             result)))
-      (nconc description result))))
+      (nconc (nreverse description) result))))
 
 (defun doc-mode-missing-parameters (keywords tag)
   (let ((parameters (mapcar 'cadr (doc-mode-filter-keyword "param" keywords)))
@@ -318,10 +343,8 @@ Returns (length LIST) if no occurrence was found."
         (save-excursion
           (goto-char (semantic-tag-start tag))
           (skip-chars-backward " \t" (point-at-bol))
-          (doc-mode-insert
-           (doc-mode-format-keyword-list
-            (doc-mode-sort-keywords keywords tag))
-           (plist-get bounds :column)))))))
+          (doc-mode-insert (doc-mode-sort-keywords keywords tag)
+                           (plist-get bounds :column)))))))
 
 (defun doc-mode-format-message (type &optional parameters)
   (if (eq type 'none)
