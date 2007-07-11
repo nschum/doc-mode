@@ -253,7 +253,7 @@ argument value) or (keyword argument)."
                                      "[ \t]*\n\\(\n+[ \t]*\\|$\\)" t))
       (push (replace-regexp-in-string "[\n\r]" " " paragraph) results))
 
-
+    ;; keywords
     (dolist (keyword (cdr (split-string doc "[@\\]\\<")))
       (setq match (split-string keyword))
       (push (if (member (car match) doc-mode-keywords-with-parameter)
@@ -263,10 +263,17 @@ argument value) or (keyword argument)."
             results))
     (nreverse results)))
 
-(defun doc-mode-filter-keyword (keyword keywords)
+(defun doc-mode-find-keyword (keyword keywords)
   (let (results)
     (dolist (k keywords)
       (when (and (consp k) (string= (car k) keyword))
+        (push k results)))
+    (nreverse results)))
+
+(defun doc-mode-filter-keyword (keyword keywords)
+  (let (results)
+    (dolist (k keywords)
+      (unless (and (consp k) (string= (car k) keyword))
         (push k results)))
     (nreverse results)))
 
@@ -308,10 +315,11 @@ Returns (length LIST) if no occurrence was found."
 (defun doc-mode-sort-keywords (keywords tag)
   (let ((lists (make-vector (1+ (length doc-mode-keyword-order)) nil))
         description)
-    ;; skip text
-    (while (stringp (car keywords)) (push (pop keywords) description))
     (dolist (k keywords)
-      (push k (elt lists (doc-mode-position (car k) doc-mode-keyword-order))))
+      (if (stringp k)
+          (push k description)
+        (push k (elt lists (doc-mode-position (car k)
+                                              doc-mode-keyword-order)))))
     (let ((i (length lists)) result)
       (while (> i 0)
         (setq result (nconc (sort (elt lists (decf i))
@@ -320,7 +328,7 @@ Returns (length LIST) if no occurrence was found."
       (nconc (nreverse description) result))))
 
 (defun doc-mode-missing-parameters (keywords tag)
-  (let ((parameters (mapcar 'cadr (doc-mode-filter-keyword "param" keywords)))
+  (let ((parameters (mapcar 'cadr (doc-mode-find-keyword "param" keywords)))
         result)
     (dolist (k (mapcar 'semantic-tag-name
                        (semantic-tag-get-attribute tag :arguments)))
@@ -332,7 +340,7 @@ Returns (length LIST) if no occurrence was found."
   (let ((parameters (mapcar 'semantic-tag-name
                             (semantic-tag-get-attribute tag :arguments)))
         result)
-    (dolist (k (doc-mode-filter-keyword "param" keywords))
+    (dolist (k (doc-mode-find-keyword "param" keywords))
       (unless (member (cadr k) parameters)
         (push k result)))
     result))
@@ -347,10 +355,20 @@ Returns (length LIST) if no occurrence was found."
              (keywords (doc-mode-extract-keywords beg end))
              (missing (doc-mode-missing-parameters keywords tag))
              (invalid (doc-mode-invalid-parameters keywords tag)))
+        ;; fix parameters
         (if (= (length missing) (length invalid))
             (while missing
               (setcar (cdr (pop invalid)) (cadr (pop missing))))
           (setq keywords (nconc keywords missing)))
+        ;; fix return value
+        (when (eq (semantic-tag-class tag) 'function)
+          (if (equal (semantic-tag-type tag) "void")
+              ;; remove
+              (setq keywords (doc-mode-filter-keyword "return" keywords))
+            ;; add
+            (unless (doc-mode-find-keyword "return" keywords)
+              (push (list "return" "<tag>") keywords))))
+
         (doc-mode-remove tag)
         (save-excursion
           (goto-char (semantic-tag-start tag))
