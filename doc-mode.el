@@ -34,12 +34,33 @@
 
 (eval-when-compile (require 'cl))
 
-(push "^No tag found$" debug-ignored-errors)
+(setq debug-ignored-errors `("^No tag found$"
+                             "^Semantic can't parse buffer$"
+                             . ,debug-ignored-errors))
 
 ;; semantic-after-auto-parse-hooks
-;; if parser-state ^, reparse or wait
+
+(defgroup doc-mode nil
+  "Minor mode for editing in-code documentation."
+  :group 'convenience
+  :group 'tools)
+
+(defcustom doc-mode-prefix-key "\C-cd"
+  "*Prefix key to use for `doc-mode'.
+The value of this variable is checked as part of loading Outline mode.
+After that, changing the prefix key requires manipulating keymaps."
+  :group doc-mode
+  :type 'string)
+
+(defcustom doc-mode-auto-check-p t
+  "*Should the buffer documentation be checked after a Semantic reparse."
+  :group 'doc-mode
+  :type '(choice (const :tag "Off" nil)
+                 (const :tag "On" t)))
 
 (defun doc-mode-current-tag ()
+  (when (semantic-parse-tree-unparseable-p)
+    (error "Semantic can't parse buffer"))
   (when (semantic-parse-tree-needs-update-p)
     ;; TODO: should be (bovinate -1), but error in semantic pre4
     (semantic-fetch-tags))
@@ -130,7 +151,9 @@ LINES is a list of strings.  INDENT determines the offset."
       (indent-to-column indent)
       (let* ((line (apply 'doc-mode-markup (pop keywords)))
              (beg (point))
-             (fill-column (or doc-mode-fill-column comment-fill-column
+             (fill-column (or doc-mode-fill-column
+                              (and (boundp 'comment-fill-column)
+                                   comment-fill-column)
                               fill-column))
              (fill-prefix
               (when doc-mode-align-descriptions
@@ -220,15 +243,14 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
 
 (defun doc-mode-clean-doc (beg end)
   "Remove the comment delimiters between BEG and END."
-  (let (result)
-    (save-excursion
-      (goto-char beg)
-      (when (looking-at "[ \t\n\r]*/\\*")
-        (goto-char (match-end 0)))
-      (while (re-search-forward "[ \t]*\\*[ \t]*\\(.*\\)*?[ \t]*\\(\\*/\\|\n\\)"
-                                end t)
-        (setq result (concat result (match-string-no-properties 1) "\n")))
-      result)))
+  (save-excursion
+    (goto-char beg)
+    (when (looking-at "[ \t\n\r]*/\\*\\*+")
+      (goto-char (match-end 0)))
+    (mapconcat 'identity
+               (split-string (buffer-substring-no-properties (point) end)
+                             "[ \t]*\n[ \t]*\\*/?[ \t]*")
+               "\n")))
 
 (defun doc-mode-extract-keywords (beg end)
   "Extract documentation keywords between BEG and END.
@@ -349,7 +371,7 @@ Returns (length LIST) if no occurrence was found."
   (interactive (list (doc-mode-current-tag-or-bust)))
   (let ((bounds (doc-mode-find-doc-bounds (semantic-tag-start tag))))
     (if (null bounds)
-        (doc-mode-add tag)
+        (doc-mode-add-tag-doc tag)
       (let* ((beg (plist-get bounds :beg))
              (end (plist-get bounds :end))
              (keywords (doc-mode-extract-keywords beg end))
@@ -369,7 +391,7 @@ Returns (length LIST) if no occurrence was found."
             (unless (doc-mode-find-keyword "return" keywords)
               (push (list "return" "<tag>") keywords))))
 
-        (doc-mode-remove tag)
+        (doc-mode-remove-tag-doc tag)
         (save-excursion
           (goto-char (semantic-tag-start tag))
           (skip-chars-backward " \t" (point-at-bol))
@@ -424,7 +446,7 @@ Returns (length LIST) if no occurrence was found."
   (interactive)
   (let ((tag (doc-mode-first-faulty-tag-doc)))
     (if (null tag)
-        (message "No faulty doc found")
+        (message "Documentation checked")
       (goto-char (semantic-tag-start (car tag)))
       (message "%s" (cdr tag)))))
 
@@ -513,7 +535,7 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
 
 ;;; toggle
 
-(defun doc-mode-toggle-tag-folding (tag)
+(defun doc-mode-toggle-tag-doc-folding (tag)
   "Toggle folding of TAG's documentation.
 If called interactively, use the tag given by `doc-mode-current-tag'."
   (interactive (list (doc-mode-current-tag-or-bust)))
@@ -522,7 +544,7 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
 
 ;;; keywords ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defconst doc-mode-keywords
+(defconst doc-mode-font-lock-keywords
   (eval-when-compile
     `((,(concat "[@\\]" (regexp-opt '("return") t) "\\>")
        (0 font-lock-keyword-face prepend))
@@ -536,32 +558,69 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
 
 (defvar doc-mode-lighter " doc")
 
+(setq doc-mode-prefix-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map "d" 'doc-mode-fix-tag-doc)
+    (define-key map "c" 'doc-mode-check-tag-doc)
+    (define-key map "t" 'doc-mode-toggle-tag-doc-folding)
+    (define-key map "f" 'doc-mode-fold-tag-doc)
+    (define-key map "u" 'doc-mode-unfold-tag-doc)
+    (define-key map "r" 'doc-mode-remove-tag-doc)
+    (define-key map "i" 'doc-mode-add-tag-doc)
+    (define-key map "n" 'doc-mode-next-faulty-doc)
+    (define-key map "\C-c" 'doc-mode-check-buffer)
+    (define-key map "\C-f" 'doc-mode-fold-all)
+    (define-key map "\C-u" 'doc-mode-unfold-all)
+    map))
+
+(defun doc-mode-auto-check ()
+  (when doc-mode
+    (message "auto-parse")))
+
 (define-minor-mode doc-mode
   "Minor mode for editing in-code documentation."
-  nil doc-mode-lighter nil
+  nil doc-mode-lighter (list (cons doc-mode-prefix-key doc-mode-prefix-map))
   (if doc-mode
-      (progn (font-lock-add-keywords nil doc-mode-keywords)
-             (setq doc-mode-overlay-map
-                   (make-hash-table :test 'semantic-equivalent-tag-p
-                                    :weakness 'value)))
+      (progn
+        (font-lock-add-keywords nil doc-mode-font-lock-keywords)
+        (when doc-mode-auto-check-p
+          (add-hook 'semantic-after-auto-parse-hooks 'doc-mode-check-buffer
+                    nil t)
+          (add-hook 'semantic-after-idle-scheduler-reparse-hooks
+                    'doc-mode-check-buffer nil t)))
     (doc-mode-unfold-all)
-    (font-lock-remove-keywords nil doc-mode-keywords))
+    (font-lock-remove-keywords nil doc-mode-font-lock-keywords)
+    (remove-hook 'semantic-after-auto-parse-hooks 'doc-mode-check-buffer t)
+    (remove-hook 'semantic-after-idle-scheduler-reparse-hooks
+                 'doc-mode-check-buffer t))
+
   (when font-lock-mode
     (font-lock-fontify-buffer)))
 
+
+
+;; (make-hook 'semantic-after-auto-parse-hooks)
+;;   (when doc-mode
+;;     (message "auto-parse")))
+
+;; (make-hook 'semantic-after-idle-scheduler-reparse-hooks)
+;;   (when doc-mode
+;;     (message "scheduler-parse")))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun doc-mode-add (tag)
+(defun doc-mode-add-tag-doc (tag)
   (interactive (list (doc-mode-current-tag-or-bust)))
   (save-excursion
     (goto-char (or (semantic-tag-start tag) (error "No tag found")))
     (let ((column (current-column)))
-      (doc-mode-remove tag)
+      (doc-mode-remove-tag-doc tag)
       (skip-chars-backward " \t" (point-at-bol))
       (doc-mode-insert (doc-mode-format-tag tag) column))))
 
 (global-set-key "\C-c\C-d" 'doc-mode-fix-tag-doc)
-(define-key c-mode-base-map "\C-c\C-d" nil)
+;; (define-key c-mode-base-map "\C-c\C-d" nil)
 
 (global-set-key "\C-ct" 'doc-mode-fold-all)
 (global-set-key "\C-c\C-t" 'doc-mode-toggle-tag-folding)
