@@ -49,7 +49,7 @@
   "*Prefix key to use for `doc-mode'.
 The value of this variable is checked as part of loading Outline mode.
 After that, changing the prefix key requires manipulating keymaps."
-  :group doc-mode
+  :group 'doc-mode
   :type 'string)
 
 (defcustom doc-mode-auto-check-p t
@@ -573,10 +573,6 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
     (define-key map "\C-u" 'doc-mode-unfold-all)
     map))
 
-(defun doc-mode-auto-check ()
-  (when doc-mode
-    (message "auto-parse")))
-
 (define-minor-mode doc-mode
   "Minor mode for editing in-code documentation."
   nil doc-mode-lighter (list (cons doc-mode-prefix-key doc-mode-prefix-map))
@@ -619,11 +615,11 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
       (skip-chars-backward " \t" (point-at-bol))
       (doc-mode-insert (doc-mode-format-tag tag) column))))
 
-(global-set-key "\C-c\C-d" 'doc-mode-fix-tag-doc)
+;; (global-set-key "\C-c\C-d" 'doc-mode-fix-tag-doc)
 ;; (define-key c-mode-base-map "\C-c\C-d" nil)
 
-(global-set-key "\C-ct" 'doc-mode-fold-all)
-(global-set-key "\C-c\C-t" 'doc-mode-toggle-tag-folding)
+;; (global-set-key "\C-ct" 'doc-mode-fold-all)
+;; (global-set-key "\C-c\C-t" 'doc-mode-toggle-tag-folding)
 
 
 
