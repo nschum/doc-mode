@@ -312,26 +312,26 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
   "Find the documentation right before POS.
 If there is anything but whitespace between the documentation and POS, nil is
 returned.  Otherwise a cons of the doc's beginning and end is given."
-  (let (beg end col found)
-    (save-excursion
-      ;; find the first /** not closed
-      (goto-char pos)
-      (setq found (search-backward "/**" nil t))
-      (while (and found (not (looking-at "\\*/")))
-        (setq beg (point))
-        (setq found (re-search-backward "/\\*\\*\\|\\*/" nil t)))
-      (when beg
-        ;; return to last known good position
-        (goto-char beg)
-        (setq col (current-column))
-        ;; move to beginning of line, if whitespace
-        ;; search for end
-        (when (search-forward "*/" nil t)
-          (setq end (point))
-          ;; check if this is actually right before POS
-          (skip-chars-forward " \t\n\r" pos)
-          (when (eq pos (point))
-            `(:beg ,beg :end ,end :column ,col)))))))
+  (save-excursion
+    (goto-char pos)
+    (skip-chars-backward " \t\n")
+    (let ((end (point)))
+      (cond
+       ;; /// Doxygen comment */
+       ((looking-back "[ \t]*///\\(.*\\)$")
+        (forward-line -1)
+        (while (looking-at "[ \t]*///\\(.*\\)$")
+          (forward-line -1))
+        (forward-line 1)
+        (skip-chars-forward " \t")
+        `(:beg ,(point) :end ,end :column ,(current-indentation)))
+       ;; /** JavaDoc comment */
+       ((looking-back "\\*/")
+        (goto-char (match-beginning 0))
+        ;; search for /**, not allowing any */ in between
+        (when (and (re-search-backward "\\(/\\*\\*\\|\\*/\\)" nil t)
+                   (match-beginning 1))
+          `(:beg ,(point) :end ,end :column ,(current-column))))))))
 
 ;;; formating ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -365,8 +365,18 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
   (let ((str (buffer-substring-no-properties beg end)))
     (if (string-match "^[@\\]brief \\([^\r\n]+\n\\)" str)
         (cons (+ (match-beginning 1) beg) (+ (match-end 1) beg))
-      (string-match "\\([^ \t\n\r*/][^\r\n]*?\\)[ \t]*\\(\n\\|\\*/\\)" str)
-      (cons (+ (match-beginning 1) beg) (+ (match-end 1) beg)))))
+      (save-excursion
+        (goto-char beg)
+        (cond
+         ;; /// Doxygen comment */
+         ((looking-at "///[ \t]*\\(.*\\)[ \t]*$")
+          (cons (match-beginning 1) (match-end 1)))
+         ;; /** JavaDoc comment */
+         ((looking-at "/\\*\\*")
+          (goto-char (match-end 0))
+          (skip-chars-forward " \t\n*")
+          (when (looking-at "\\(.*\\)\\(\\. \\|$\\|\\*/\\)")
+            (cons (match-beginning 1) (match-end 1)))))))))
 
 (defun doc-mode-clean-doc (beg end)
   "Remove the comment delimiters between BEG and END."
@@ -696,10 +706,10 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
   (eval-when-compile
     `((,(concat "[@\\]" (regexp-opt '("return") t) "\\>")
        (0 font-lock-keyword-face prepend))
-      (,(concat "\\([@\\]" (regexp-opt '("param"))
-                "\\>\\)\\(?:\\s +\\(\\sw\\)+\\)?")
+      (,(concat "\\([@\\]" (regexp-opt '("param") t)
+                "\\>\\)\\(?:[ \t]+\\(\\sw+\\)\\)?")
        (1 font-lock-keyword-face prepend)
-       (2 font-lock-variable-name-face prepend)
+       (3 font-lock-variable-name-face prepend)
        ))))
 
 ;;; mode ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
