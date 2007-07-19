@@ -41,6 +41,8 @@
                              "^Semantic can't parse buffer$"
                              "^No template found$"
                              "^doc-mode not enabled$"
+                             "^Beginning of buffer$"
+                             "^End of buffer$"
                              . ,debug-ignored-errors))
 
 ;; semantic-after-auto-parse-hooks
@@ -100,27 +102,62 @@ After that, changing the prefix key requires manipulating keymaps."
 
 (defun doc-mode-add-template (beg end)
   (let ((overlay (make-overlay beg (point))))
+    (overlay-put overlay 'intangible t)
     (overlay-put overlay 'face 'highlight)
-    (overlay-put overlay 'insert-in-front-hooks '(doc-mode-delete-overlay))
-;;     (overlay-put overlay 'modification-hooks '(doc-mode-delete-overlay))
+    (overlay-put overlay 'insert-in-front-hooks '(doc-mode-replace-overlay))
+    (overlay-put overlay 'modification-hooks '(doc-mode-delete-overlay))
     (push overlay doc-mode-templates)))
+
+(defvar doc-mode-temp nil)
 
 (defun doc-mode-delete-overlay (ov after-p beg end &optional r)
   (unless after-p
-    (let ((ov-beg (overlay-start ov))
-          (ov-end (overlay-end ov)))
-      (unless (= ov-end beg)
-        ;; unfold surrounding doc
-        (mapc 'doc-mode-unfold-by-overlay (overlays-in (1- ov-beg) (1+ ov-end)))
-        ;; remove overlay
-        (setq doc-mode-templates (delq ov doc-mode-templates))
-        (delete-overlay ov)
-        (when (= beg end)
-          ;; remove text also
-          (delete-region ov-beg ov-end))))))
+    (mapc 'doc-mode-unfold-by-overlay
+          (overlays-in (1- (overlay-start ov)) (1+ (overlay-end ov))))
+    (delete-overlay ov)
+    (setq doc-mode-templates (delq ov doc-mode-templates))))
 
+(defun doc-mode-replace-overlay (ov after-p beg end &optional r)
+  (unless after-p
+    (delete-region (overlay-start ov) (overlay-end ov))))
+
+;;;###autoload
 (defun doc-mode-next-template ()
-  "Jump to an unfinished documentation template."
+  "Jump to the next unfinished documentation template."
+  (interactive)
+  (let ((min-start (point-max))
+        (pos (point))
+        start)
+    (dolist (ov doc-mode-templates)
+      (setq start (overlay-start ov))
+      (and (> start pos)
+           (< start min-start)
+           (setq min-start start)))
+    (when (= min-start (point-max))
+      (error "End of buffer"))
+    (push-mark)
+    (goto-char min-start)))
+
+;;;###autoload
+(defun doc-mode-previous-template ()
+  "Jump to the previous unfinished documentation template."
+  (interactive)
+  (let ((max-start (point-min))
+        (pos (point))
+        start)
+    (dolist (ov doc-mode-templates)
+      (setq start (overlay-start ov))
+      (and (< start pos)
+           (> start max-start)
+           (setq max-start start)))
+    (when (= max-start (point-min))
+      (error "Beginning of buffer"))
+    (push-mark)
+    (goto-char max-start)))
+
+;;;###autoload
+(defun doc-mode-first-template ()
+  "Jump to the oldest unfinished documentation template."
   (interactive)
   (unless doc-mode-templates
     (error "No template found"))
@@ -246,7 +283,7 @@ LINES is a list of keywords."
         (move-to-column indent t))))
 
     (and doc-mode-jump-to-template doc-mode-templates
-         (doc-mode-next-template)))
+         (doc-mode-first-template)))
 
 (defun doc-mode-remove-doc (point)
   "Remove the documentation before POINT."
@@ -262,6 +299,7 @@ LINES is a list of keywords."
         (when (eolp) (incf end))
         (delete-region beg end)))))
 
+;;;###autoload
 (defun doc-mode-remove-tag-doc (tag)
   "Remove the documentation for TAG.
 If called interactively, use the tag given by `doc-mode-current-tag'."
@@ -304,8 +342,8 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
 
 (defun doc-mode-new-keyword (keyword &optional argument)
   (if (member keyword doc-mode-keywords-with-parameter)
-      (list keyword argument '(prompt "doc"))
-    (list keyword '(prompt "doc"))))
+      (list keyword argument '(prompt "<doc>"))
+    (list keyword '(prompt "<doc>"))))
 
 (defun doc-mode-format-tag (tag)
   (cons `(prompt ,(format "Description for %s." (semantic-tag-name tag)))
@@ -461,6 +499,7 @@ Returns (length LIST) if no occurrence was found."
         (push k result)))
     result))
 
+;;;###autoload
 (defun doc-mode-fix-tag-doc (tag)
   (interactive (list (doc-mode-current-tag-or-bust)))
   (let ((bounds (doc-mode-find-doc-bounds (semantic-tag-start tag))))
@@ -527,12 +566,14 @@ Returns (length LIST) if no occurrence was found."
         (pop tags)))
     invalid))
 
+;;;###autoload
 (defun doc-mode-check-buffer ()
   (interactive)
   (let ((invalid-p (doc-mode-first-faulty-tag-doc)))
     (setq doc-mode-lighter (if invalid-p " doc!" " doc"))
     invalid-p))
 
+;;;###autoload
 (defun doc-mode-next-faulty-doc ()
   "Jump to the next faulty documentation and print error."
   (interactive)
@@ -547,11 +588,6 @@ Returns (length LIST) if no occurrence was found."
 
 (defvar doc-mode-folds nil)
 (make-variable-buffer-local 'doc-mode-folds)
-
-(defun doc-mode-grow-overlay (ov after-p beg end &optional r)
-  (when after-p
-    (move-overlay ov (min beg (overlay-start ov))
-                  (max end (overlay-end ov)))))
 
 (defun doc-mode-fold-doc (point)
   (let ((bounds (doc-mode-find-doc-bounds point)))
@@ -572,6 +608,7 @@ Returns (length LIST) if no occurrence was found."
             (overlay-put ov 'doc-mode-fold siblings))
           (setq doc-mode-folds (nconc doc-mode-folds siblings)))))))
 
+;;;###autoload
 (defun doc-mode-fold-tag-doc (tag)
   "Fold the documentation for TAG.
 If called interactively, use the tag given by `doc-mode-current-tag'."
@@ -594,6 +631,7 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
   (dolist (ov (overlay-get overlay 'doc-mode-fold))
     (overlay-put ov 'invisible invisible)))
 
+;;;###autoload
 (defun doc-mode-unfold-doc (point)
   "Unfold the comment before POINT."
   (interactive "d")
@@ -614,6 +652,7 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
         ;; this is used to toggle
         anything-done))))
 
+;;;###autoload
 (defun doc-mode-unfold-tag-doc (tag)
   "Unfold the documentation for TAG.
 If called interactively, use the tag given by `doc-mode-current-tag'."
@@ -624,6 +663,7 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
 
 ;;; all
 
+;;;###autoload
 (defun doc-mode-fold-all (&optional arg)
   (interactive "P")
   (unless doc-mode
@@ -633,6 +673,7 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
     (dolist (tag (doc-mode-find-eligible-tags))
       (doc-mode-fold-tag-doc tag))))
 
+;;;###autoload
 (defun doc-mode-unfold-all ()
   (interactive)
   (dolist (ov doc-mode-folds)
@@ -641,6 +682,7 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
 
 ;;; toggle
 
+;;;###autoload
 (defun doc-mode-toggle-tag-doc-folding (tag)
   "Toggle folding of TAG's documentation.
 If called interactively, use the tag given by `doc-mode-current-tag'."
@@ -680,6 +722,7 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
     (define-key map "\C-u" 'doc-mode-unfold-all)
     map))
 
+;;;###autoload
 (define-minor-mode doc-mode
   "Minor mode for editing in-code documentation."
   nil doc-mode-lighter (list (cons doc-mode-prefix-key doc-mode-prefix-map))
@@ -705,6 +748,7 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;;;###autoload
 (defun doc-mode-add-tag-doc (tag)
   (interactive (list (doc-mode-current-tag-or-bust)))
   (doc-mode-insert-doc (doc-mode-format-tag tag) (semantic-tag-start tag)))
