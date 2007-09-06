@@ -362,16 +362,26 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
       (list keyword argument '(prompt "<doc>"))
     (list keyword '(prompt "<doc>"))))
 
+(defun doc-mode-has-return-value-p (tag)
+  "Test if TAG has a return value to format."
+  (and (eq (semantic-tag-class tag) 'function)
+       (not (equal (semantic-tag-type tag) "void"))
+       (not (semantic-tag-get-attribute tag :constructor-flag))
+       (when (equal (semantic-tag-type tag) "int")
+         ;; semantic bug, constructors sometimes appear to have int type
+         (save-excursion (goto-char (semantic-tag-start tag))
+                         (and (re-search-forward "\\(\\<int\\>\\)\\|{\\|;"
+                                                 (semantic-tag-end tag) t)
+                              (match-beginning 1))))))
+
 (defun doc-mode-format-tag (tag)
   (cons `(prompt ,(format "Description for %s." (semantic-tag-name tag)))
         (nconc (mapcar (lambda (argument)
                          (doc-mode-new-keyword "param"
                                                (semantic-tag-name argument)))
                        (semantic-tag-get-attribute tag :arguments))
-               (and (eq (semantic-tag-class tag) 'function)
-                    (not (equal (semantic-tag-type tag) "void"))
-                    (not (semantic-tag-get-attribute tag :prototype-flag))
-                    (list (doc-mode-new-keyword "return"))))))
+               (when (doc-mode-has-return-value-p tag)
+                 (list (doc-mode-new-keyword "return"))))))
 
 ;;; extracting ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -550,15 +560,12 @@ Returns (length LIST) if no occurrence was found."
               (setcar (cdr (pop invalid)) (cadr (pop missing))))
           (setq keywords (nconc keywords missing)))
         ;; fix return value
-        (when (eq (semantic-tag-class tag) 'function)
-          (if (or (equal (semantic-tag-type tag) "void")
-                  (semantic-tag-get-attribute tag :prototype-flag))
-              ;; remove
-              (setq keywords (doc-mode-filter-keyword "return" keywords))
+        (if (doc-mode-has-return-value-p tag)
             ;; add
             (unless (doc-mode-find-keyword "return" keywords)
-              (push (doc-mode-new-keyword "return") keywords))))
-
+              (push (doc-mode-new-keyword "return") keywords))
+          ;; remove
+          (setq keywords (doc-mode-filter-keyword "return" keywords)))
         (doc-mode-remove-tag-doc tag)
         (doc-mode-insert-doc (doc-mode-sort-keywords keywords tag)
                              (semantic-tag-start tag))))))
