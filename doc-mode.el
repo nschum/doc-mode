@@ -181,6 +181,9 @@ After that, changing the prefix key requires manipulating keymaps."
 (setq doc-mode-allow-single-line-comments t)
 (setq doc-mode-fold-single-line-comments t)
 
+(setq doc-mode-empty-line-after-summary t)
+(setq doc-mode-empty-line-before-keywords nil)
+
 ;; nil means use comment-fill-column
 (setq doc-mode-fill-column nil)
 
@@ -265,6 +268,11 @@ LINES is a list of keywords."
                   (eq 'prompt (caar keywords)))
           (doc-mode-insert-line (pop keywords) indent))
 
+        (when (and doc-mode-empty-line-after-summary
+                   (or (null doc-mode-empty-line-before-keywords)
+                       (stringp (cadr keywords))))
+          (doc-mode-insert-line "" indent))
+
         ;; paragraphs
         (if (cdr keywords)
             (while (stringp (car keywords))
@@ -273,6 +281,9 @@ LINES is a list of keywords."
                 (doc-mode-insert-line "" indent)))
           (while (stringp (car keywords))
             (doc-mode-insert-line (pop keywords) indent)))
+
+        (when doc-mode-empty-line-before-keywords
+          (doc-mode-insert-line "" indent))
 
         ;; keywords
         (while keywords
@@ -315,26 +326,29 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
   "Find the documentation right before POS.
 If there is anything but whitespace between the documentation and POS, nil is
 returned.  Otherwise a cons of the doc's beginning and end is given."
-  (save-excursion
-    (goto-char pos)
-    (skip-chars-backward " \t\n")
-    (let ((end (point)))
-      (cond
-       ;; /// Doxygen comment */
-       ((looking-back "[ \t]*///\\(.*\\)$")
-        (forward-line -1)
-        (while (looking-at "[ \t]*///\\(.*\\)$")
-          (forward-line -1))
-        (forward-line 1)
-        (skip-chars-forward " \t")
-        `(:beg ,(point) :end ,end :column ,(current-indentation)))
-       ;; /** JavaDoc comment */
-       ((looking-back "\\*/")
-        (goto-char (match-beginning 0))
-        ;; search for /**, not allowing any */ in between
-        (when (and (re-search-backward "\\(/\\*\\*\\|\\*/\\)" nil t)
-                   (match-beginning 1))
-          `(:beg ,(point) :end ,end :column ,(current-column))))))))
+  (let ((regexps doc-mode-bounds-regexp-alist)
+        end)
+    (save-excursion
+      (goto-char pos)
+      (when (re-search-backward "[ \t]*\n[ \t]*\\=" nil t)
+        (setq end (point))
+        (cond
+         ;; /// Doxygen comment */
+         ((looking-back "[ \t]*//[/!]\\(.*\\)$")
+          (forward-line -1)
+          (while (looking-at "[ \t]*//[/!]\\(.*\\)$")
+            (forward-line -1))
+          (forward-line 1)
+          (skip-chars-forward " \t")
+          `(:beg ,(point) :end ,end :column ,(current-indentation)))
+         ;; /** JavaDoc comment */
+         ((looking-back "\\*/")
+          (goto-char (match-beginning 0))
+          ;; search for /*, not allowing any */ in between
+          (when (and (re-search-backward "\\(/\\*\\)\\|\\*/" nil t)
+                     (match-beginning 1)
+                     (memq (char-after (1+ (match-beginning 1))) '(?! ?*)))
+            `(:beg ,(point) :end ,end :column ,(current-column)))))))))
 
 ;;; formating ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -366,36 +380,35 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
     (buffer-substring-no-properties (car bounds) (cdr bounds))))
 
 (defun doc-mode-find-summary (beg end)
-  (let ((str (buffer-substring-no-properties beg end)))
-    (if (string-match "^[@\\]brief \\([^\r\n]+\n\\)" str)
-        (cons (+ (match-beginning 1) beg) (+ (match-end 1) beg))
-      (save-excursion
-        (goto-char beg)
-        (cond
-         ;; /// Doxygen comment */
-         ((looking-at "///[ \t]*\\(.*\\)[ \t]*$")
-          (cons (match-beginning 1) (match-end 1)))
-         ;; /** JavaDoc comment */
-         ((looking-at "/\\*\\*")
-          (goto-char (match-end 0))
-          (skip-chars-forward " \t\n*")
-          (when (looking-at "\\(.*?\\)[ \t]*\\($\\|\\*+/\\)")
-            (cons (match-beginning 1) (match-end 1))))
-         (t (cons beg end)))))))
+  (save-excursion
+    (goto-char beg)
+    (if (or (re-search-forward "^[@\\]brief \\([^\t ][^\n]*\n\\)" end t)
+            (re-search-forward "\\<\\(.*\\)\\(\\*+/\\|\n\\)" end t))
+        (cons (match-beginning 1) (match-end 1))
+      (cons beg beg))))
+
+(defconst doc-mode-begin-regexp
+  (eval-when-compile (concat "[ \t\n]*"
+                             "\\("
+                             "/\\*\\(\\*+\\|!\\)"
+                             "\\|"
+                             "//[!/]"
+                             "\\)[ \t]*")))
 
 (defun doc-mode-clean-doc (beg end)
   "Remove the comment delimiters between BEG and END."
   (save-excursion
     (goto-char beg)
-    (when (looking-at "[ \t\n\r]*/\\*\\*+")
+    (when (looking-at doc-mode-begin-regexp)
       (setq beg (match-end 0)))
     (goto-char end)
-    (when (looking-back "[ \t\n\r]\\*+/")
+    (when (looking-back "[ \t\n\r]*\\*+/" nil t)
       (setq end (match-beginning 0)))
-    (mapconcat 'identity
-               (split-string (buffer-substring-no-properties beg end)
-                             "[ \t]*\n[ \t]*\\*/?[ \t]*")
-               "\n")))
+    (let ((lines (split-string (buffer-substring-no-properties beg end)
+                               "[ \t]*\n[ \t]*\\(\\*/?\\|//[!/]\\)?[ \t]*")))
+      (while (equal (car lines) "")
+        (pop lines))
+      (mapconcat 'identity lines "\n"))))
 
 (defun doc-mode-extract-keywords (beg end)
   "Extract documentation keywords between BEG and END.
@@ -413,7 +426,7 @@ argument value) or (keyword argument)."
             paragraphs (match-string-no-properties 1 paragraphs)))
 
     ;; first line summary
-    (when (string-match "\\`[ \t\n]*\\(.+\\.\\)\\([ \n]\\|\\'\\)" paragraphs)
+    (when (string-match "\\`[ \t\n]*\\(.+\\.\\)\\([ \n]+\\|\\'\\)" paragraphs)
       (push (match-string 1 paragraphs) results)
       (setq pos (match-end 0)))
 
