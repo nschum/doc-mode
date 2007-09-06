@@ -76,7 +76,9 @@ After that, changing the prefix key requires manipulating keymaps."
     (error "Semantic can't parse buffer"))
   (when (or (semantic-parse-tree-needs-rebuild-p)
             (semantic-parse-tree-needs-update-p))
-    (semantic-fetch-tags))
+    (condition-case nil
+        (semantic-fetch-tags)
+      (error (error "Semantic can't parse buffer"))))
   (save-excursion
     (or (semantic-current-tag-of-class 'function)
         (semantic-current-tag-of-class 'variable)
@@ -119,7 +121,8 @@ After that, changing the prefix key requires manipulating keymaps."
 
 (defun doc-mode-replace-overlay (ov after-p beg end &optional r)
   (unless after-p
-    (delete-region (overlay-start ov) (overlay-end ov))))
+    (let ((inhibit-modification-hooks nil))
+      (delete-region (overlay-start ov) (overlay-end ov)))))
 
 ;;;###autoload
 (defun doc-mode-next-template ()
@@ -254,7 +257,7 @@ LINES is a list of keywords."
       (if (and (not (cdr keywords)) doc-mode-allow-single-line-comments)
           (progn (insert doc-mode-single-begin)
                  (doc-mode-insert (car keywords))
-                 (insert doc-mode-single-end ?\n))
+                 (insert doc-mode-single-end "\n"))
         (insert doc-mode-template-begin "\n")
 
         ;; first line
@@ -353,6 +356,7 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
                        (semantic-tag-get-attribute tag :arguments))
                (and (eq (semantic-tag-class tag) 'function)
                     (not (equal (semantic-tag-type tag) "void"))
+                    (not (semantic-tag-get-attribute tag :prototype-flag))
                     (list (doc-mode-new-keyword "return"))))))
 
 ;;; extracting ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -375,8 +379,9 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
          ((looking-at "/\\*\\*")
           (goto-char (match-end 0))
           (skip-chars-forward " \t\n*")
-          (when (looking-at "\\(.*\\)\\(\\. \\|$\\|\\*/\\)")
-            (cons (match-beginning 1) (match-end 1)))))))))
+          (when (looking-at "\\(.*?\\)[ \t]*\\($\\|\\*+/\\)")
+            (cons (match-beginning 1) (match-end 1))))
+         (t (cons beg end)))))))
 
 (defun doc-mode-clean-doc (beg end)
   "Remove the comment delimiters between BEG and END."
@@ -442,16 +447,22 @@ argument value) or (keyword argument)."
     (nreverse results)))
 
 (defun doc-mode-find-eligible-tags ()
-  (let (tags)
-    (semantic-brute-find-tag-by-function
-     (lambda (tag)
-       (case (semantic-tag-class tag)
-         ((function variable) (push tag tags))
-         (type (setq tags
-                     (nconc (semantic-tag-type-members tag)
-                            tags)))))
-     (semanticdb-file-stream (buffer-file-name)))
-    tags))
+  (when buffer-file-name
+    (unless (or (semantic-parse-tree-unparseable-p)
+                (semantic-parse-tree-needs-rebuild-p)
+                (semantic-parse-tree-needs-update-p))
+      (ignore-errors
+        (let (tags)
+          (semantic-brute-find-tag-by-function
+           (lambda (tag)
+             (when (semantic-tag-start tag)
+               (case (semantic-tag-class tag)
+                 ((function variable) (push tag tags))
+                 (type (setq tags
+                             (nconc (semantic-tag-type-members tag)
+                                    tags))))))
+           (semanticdb-file-stream buffer-file-name))
+          tags)))))
 
 ;;; checking ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -527,7 +538,8 @@ Returns (length LIST) if no occurrence was found."
           (setq keywords (nconc keywords missing)))
         ;; fix return value
         (when (eq (semantic-tag-class tag) 'function)
-          (if (equal (semantic-tag-type tag) "void")
+          (if (or (equal (semantic-tag-type tag) "void")
+                  (semantic-tag-get-attribute tag :prototype-flag))
               ;; remove
               (setq keywords (doc-mode-filter-keyword "return" keywords))
             ;; add
