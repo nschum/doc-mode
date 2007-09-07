@@ -791,7 +791,7 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
 
 (defconst doc-mode-font-lock-keywords
   (eval-when-compile
-    `((,(concat "[@\\]" (regexp-opt '("return") t) "\\>")
+    `((,(concat "[@\\]\\<.*?\\>")
        (0 font-lock-keyword-face prepend))
       (,(concat "\\([@\\]" (regexp-opt '("param") t)
                 "\\>\\)\\(?:[ \t]+\\(\\sw+\\)\\)?")
