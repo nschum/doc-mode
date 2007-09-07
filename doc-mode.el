@@ -1,9 +1,9 @@
-;;; doc-mode.el --- 
+;;; doc-mode.el --- convenient editing of in-code documentation
 ;;
 ;; Copyright (C) 2007 Nikolaj Schumacher;;
 ;; Author: Nikolaj Schumacher <bugs * nschum de>
-;; Version: 
-;; Keywords: 
+;; Version: 0.1
+;; Keywords: convenience tools
 ;; URL: http://nschum.de/src/emacs/doc-mode/
 ;; Compatibility: GNU Emacs 22.x
 ;;
@@ -25,9 +25,29 @@
 ;;
 ;;; Commentary:
 ;;
+;; This mode requires the Semantic package to be installed and running:
+;; http://cedet.sourceforge.net/
+;;
+;; doc-mode allows easy creation and editing of JavaDoc or Doxygen comment
+;; blocks in your code.  It also greatly improves readability of code by folding
+;; the blocks, so they don't take up precious screen lines.
+;;
+;; Add the following to your .emacs file:
+;; (require 'doc-mode)
+;; (add-hook 'c++-mode-hook 'doc-mode)
+;; (add-hook 'java-mode-hook 'doc-mode)
+;; [...]
+;;
+;; The command `doc-mode-fix-tag-doc' or "C-cd" adds or replaces the
+;; documentation for the function, variable, or class at point.
+;; `doc-mode-remove-tag-doc' or "C-cr" removes it.
+;;
+;; You can fold the comments by using `doc-mode-toggle-tag-doc-folding' or
+;; `doc-mode-fold-all'.
+;;
 ;;; Changes Log:
 ;;
-;; 2007-??-?? (0.?)
+;; 2007-09-07 (0.1)
 ;;    Initial release.
 ;;
 ;;; Code:
