@@ -125,11 +125,6 @@ All other keywords will be considered regular text."
   :group 'doc-mode
   :type '(repeat string))
 
-(defcustom doc-mode-keywords-with-parameter '("param")
-  "*A list of keywords that will take an additional argument."
-  :group 'doc-mode
-  :type '(repeat string))
-
 (defcustom doc-mode-allow-single-line-comments t
   "*Whether to allow a more space-saving format for very short comments.
 When this is enabled, `doc-mode-template-single-line-start' and
@@ -264,7 +259,7 @@ If this is nil, `comment-fill-column' is used."
   (if (numberp doc-mode-align-keyword-arguments)
       doc-mode-align-keyword-arguments
     (+ 1 (length (car keyword))
-       (if (member (car keyword) doc-mode-keywords-with-parameter)
+       (if (equal (car keyword) "param")
            (1+ (length (cdr keyword)))
          0))))
 
@@ -418,7 +413,7 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
           (when description " ") description))
 
 (defun doc-mode-new-keyword (keyword &optional argument)
-  (if (member keyword doc-mode-keywords-with-parameter)
+  (if (equal keyword "param")
       (list keyword argument '(prompt "<doc>"))
     (list keyword '(prompt "<doc>"))))
 
@@ -508,7 +503,7 @@ argument value) or (keyword argument)."
     ;; keywords
     (dolist (keyword (cdr (split-string doc "[@\\]\\<")))
       (setq match (split-string keyword))
-      (push (if (member (car match) doc-mode-keywords-with-parameter)
+      (push (if (equal (car match) "param")
                 (list (car match) (cadr match)
                       (mapconcat 'identity (cddr match) " "))
               (list (car match) (mapconcat 'identity (cdr match) " ")))
