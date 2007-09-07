@@ -71,6 +71,96 @@ After that, changing the prefix key requires manipulating keymaps."
   :type '(choice (const :tag "Off" nil)
                  (const :tag "On" t)))
 
+(defcustom doc-mode-template-start "/**"
+  "*The string to insert at the beginning of a comment."
+  :group 'doc-mode
+  :type 'string)
+
+(defcustom doc-mode-template-end " */"
+  "*The string to insert at the end of a comment."
+  :group 'doc-mode
+  :type 'string)
+
+(defcustom doc-mode-template-continue " * "
+  "*The string to insert at the beginning of each line in a comment."
+  :group 'doc-mode
+  :type 'string)
+
+(defcustom doc-mode-template-single-line-start "/** "
+  "*The string to insert at the beginning of a single-line comment.
+For using single-line comments, see `doc-mode-allow-single-line-comments'"
+  :group 'doc-mode
+  :type 'string)
+
+(defcustom doc-mode-template-single-line-end " */"
+  "*The string to insert at the end of a single-line comment.
+For using single-line comments, see `doc-mode-allow-single-line-comments'"
+  :group 'doc-mode
+  :type 'string)
+
+(defcustom doc-mode-template-keyword-char "@"
+  "*The character used to begin keywords."
+  :group 'doc-mode
+  :type '(choice (const :tag "@" "@")
+                 (const :tag "\\" "\\")
+                 (string :tag "Other")))
+
+(defcustom doc-mode-template-empty-line-after-summary nil
+  "*Whether to put an empty line after the first one in the comment."
+  :group 'doc-mode
+  :type '(choice (const :tag "Off" nil)
+                 (const :tag "On" t)))
+
+(defcustom doc-mode-template-empty-line-before-keywords nil
+  "*Whether to put an empty line before the keyword list in a comment."
+  :group 'doc-mode
+  :type '(choice (const :tag "Off" nil)
+                 (const :tag "On" t)))
+
+(defcustom doc-mode-template-keywords
+  '("deprecated" "param" "return" "author" "exception" "throws" "version"
+    "since" "see" "sa" "todo")
+  "*Keywords that should be listed in this order.
+All other keywords will be considered regular text."
+  :group 'doc-mode
+  :type '(repeat string))
+
+(defcustom doc-mode-keywords-with-parameter '("param")
+  "*A list of keywords that will take an additional argument."
+  :group 'doc-mode
+  :type '(repeat string))
+
+(defcustom doc-mode-allow-single-line-comments t
+  "*Whether to allow a more space-saving format for very short comments.
+When this is enabled, `doc-mode-template-single-line-start' and
+`doc-mode-template-single-line-end' will be used to format single-line
+comments instead of `doc-mode-template-start', `doc-mode-template-end' and
+`doc-mode-template-continue'."
+  :group 'doc-mode
+  :type '(choice (const :tag "Off" nil)
+                 (const :tag "On" t)))
+
+(defcustom doc-mode-fold-single-line-comments nil
+  "*Whether to bother folding comments that are already a single line."
+  :group 'doc-mode
+  :type '(choice (const :tag "Off" nil)
+                 (const :tag "On" t)))
+
+(defcustom doc-mode-align-keyword-arguments t
+  "*Whether to align the arguments to a keyword continued in the next line.
+This may also be a number, describing how far to indent the argument list."
+  :group 'doc-mode
+  :type '(choice (const :tag "Off" nil)
+                 (integer :tag "Indent" nil)
+                 (const :tag "On" t)))
+
+(defcustom doc-mode-fill-bcolumn nil
+  "*The column at which to break text when formatting it.
+If this is nil, `comment-fill-column' is used."
+  :group 'doc-mode
+  :type '(choice (const :tag "Default" nil)
+                 (integer :tag "Fill Column")))
+
 (defun doc-mode-current-tag ()
   (when (semantic-parse-tree-unparseable-p)
     (error "Semantic can't parse buffer"))
@@ -169,40 +259,10 @@ After that, changing the prefix key requires manipulating keymaps."
 
 ;;; insertion ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(setq doc-mode-template-begin "/**")
-(setq doc-mode-template-end " */")
-(setq doc-mode-template-continue " * ")
-
-(setq doc-mode-keyword-anchor "@")
-
-(setq doc-mode-single-begin "/** ")
-(setq doc-mode-single-end " */")
-
-(setq doc-mode-allow-single-line-comments t)
-(setq doc-mode-fold-single-line-comments t)
-
-(setq doc-mode-empty-line-after-summary t)
-(setq doc-mode-empty-line-before-keywords nil)
-
-;; nil means use comment-fill-column
-(setq doc-mode-fill-column nil)
-
-;; numbers allowed
-(setq doc-mode-align-descriptions t)
-
-(setq doc-mode-keywords-with-argument-regexp
-      (eval-when-compile
-        (concat "\\([@\\]" (regexp-opt '("param"))
-                "\\>\\)\\(?:\\s +\\(\\sw\\)+\\)?")))
-
-(setq doc-mode-keyword-order '("param" "return"))
-
-(defconst doc-mode-keywords-with-parameter '("param"))
-
 (defun doc-mode-line-indent (keyword)
   "Determine left side offset when indenting LINE."
-  (if (numberp doc-mode-align-descriptions)
-      doc-mode-align-descriptions
+  (if (numberp doc-mode-align-keyword-arguments)
+      doc-mode-align-keyword-arguments
     (+ 1 (length (car keyword))
        (if (member (car keyword) doc-mode-keywords-with-parameter)
            (1+ (length (cdr keyword)))
@@ -243,7 +303,7 @@ After that, changing the prefix key requires manipulating keymaps."
   (let* (;;(line (apply 'doc-mode-markup keyword))
          (beg (point))
          (fill-column (or doc-mode-fill-column comment-fill-column fill-column))
-         (fill-prefix (when doc-mode-align-descriptions
+         (fill-prefix (when doc-mode-align-keyword-arguments
                         (concat (buffer-substring (point-at-bol) (point))
                                 doc-mode-template-continue
                                 (make-string (doc-mode-line-indent keyword) ? )
@@ -258,18 +318,18 @@ LINES is a list of keywords."
     (let ((indent (current-column)))
 
       (if (and (not (cdr keywords)) doc-mode-allow-single-line-comments)
-          (progn (insert doc-mode-single-begin)
+          (progn (insert doc-mode-template-single-line-start)
                  (doc-mode-insert (car keywords))
-                 (insert doc-mode-single-end "\n"))
-        (insert doc-mode-template-begin "\n")
+                 (insert doc-mode-template-single-line-end "\n"))
+        (insert doc-mode-template-start "\n")
 
         ;; first line
         (when (or (stringp (car keywords))
                   (eq 'prompt (caar keywords)))
           (doc-mode-insert-line (pop keywords) indent))
 
-        (when (and doc-mode-empty-line-after-summary
-                   (or (null doc-mode-empty-line-before-keywords)
+        (when (and doc-mode-template-empty-line-after-summary
+                   (or (null doc-mode-template-empty-line-before-keywords)
                        (stringp (cadr keywords))))
           (doc-mode-insert-line "" indent))
 
@@ -282,7 +342,7 @@ LINES is a list of keywords."
           (while (stringp (car keywords))
             (doc-mode-insert-line (pop keywords) indent)))
 
-        (when doc-mode-empty-line-before-keywords
+        (when doc-mode-template-empty-line-before-keywords
           (doc-mode-insert-line "" indent))
 
         ;; keywords
@@ -511,13 +571,13 @@ Returns (length LIST) if no occurrence was found."
     (string< (cadr a) (cadr b))))
 
 (defun doc-mode-sort-keywords (keywords tag)
-  (let ((lists (make-vector (1+ (length doc-mode-keyword-order)) nil))
+  (let ((lists (make-vector (1+ (length doc-mode-template-keywords)) nil))
         description)
     (dolist (k keywords)
       (if (stringp k)
           (push k description)
         (push k (elt lists (doc-mode-position (car k)
-                                              doc-mode-keyword-order)))))
+                                              doc-mode-template-keywords)))))
     (let ((i (length lists)) result)
       (while (> i 0)
         (setq result (nconc (sort (elt lists (decf i))
