@@ -47,6 +47,8 @@
 ;;
 ;;; Changes Log:
 ;;
+;;    Actual keyword highlighting.
+;;
 ;; 2007-09-07 (0.1)
 ;;    Initial release.
 ;;
@@ -810,13 +812,58 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
 
 (defconst doc-mode-font-lock-keywords
   (eval-when-compile
-    `((,(concat "[@\\]\\<.*?\\>")
+    `((,(concat "[\\@]"
+         (regexp-opt
+          '("addindex" "addtogroup" "anchor" "arg" "author" "brief" "callgraph"
+            "callergraph" "category" "code" "cond" "copydoc" "date" "defgroup"
+            "deprecated" "details" "dir" "dontinclude" "dot" "dotfile" "e"
+            "else" "elseif" "em" "endcode" "endcond" "enddot" "endhtmlonly"
+            "endif" "endlatexonly" "endlink" "endmanonly" "endmsc" "endverbatim"
+            "endxmlonly" "example" "f$" "f[" "f]" "file" "fn" "hideinitializer"
+            "htmlinclude" "htmlonly" "if" "ifnot" "image" "include"
+            "includelineno" "ingroup" "internal" "invariant" "latexonly" "li"
+            "line" "link" "mainpage" "manonly" "msc" "n" "name" "nosubgrouping"
+            "note" "overload" "package" "page" "par" "paragraph"  "post" "pre"
+            "private" "privatesection" "property" "protected" "protectedsection"
+            "public" "publicsection" "ref" "remarks" "return" "retval" "sa"
+            "section" "see" "serial" "serialData" "serialField"
+            "showinitializer" "since" "skip" "skipline" "subpage" "subsection"
+            "subsubsection" "test" "typedef" "until" "defvar" "verbatim"
+            "verbinclude" "version" "weakgroup" "xmlonly" "xrefitem" "$" "@"
+            "\\" "&" "~" "<" ">" "#" "%") t)
+         "\\>")
        (0 font-lock-keyword-face prepend))
-      (,(concat "\\([@\\]" (regexp-opt '("param") t)
-                "\\>\\)\\(?:[ \t]+\\(\\sw+\\)\\)?")
+      (,(concat "\\([@\\]"
+         (regexp-opt '("class" "struct" "union" "exception" "enum" "throw"
+                       "throws") t)
+         "\\)\\>\\(?:[ \t]+\\(\\sw+\\)\\)?")
        (1 font-lock-keyword-face prepend)
-       (3 font-lock-variable-name-face prepend)
-       ))))
+       (3 font-lock-type-face prepend))
+      (,(concat "\\([@\\]"
+         (regexp-opt '("param" "param[in]" "param[out]" "param[in+out]" "a"
+                       "namespace" "relates" "relatesalso" "def") t)
+         "\\)\\>\\(?:[ \t]+\\(\\sw+\\)\\)?")
+       (1 font-lock-keyword-face prepend)
+       (3 font-lock-variable-name-face prepend))
+      (,(concat "\\([@\\]retval\\)\\>\\(?:[ \t]+\\(\\sw+\\)\\)?")
+       (1 font-lock-keyword-face prepend)
+       (2 font-lock-function-name-face prepend))
+      (,(concat "[@\\]" (regexp-opt '("attention" "warning" "todo" "bug") t)
+                "\\>")
+       (0 font-lock-warning-face prepend))
+      (,(concat "{@"
+         (regexp-opt '("docRoot" "inheritDoc" "link" "linkplain" "value") t)
+         "}")
+       (0 font-lock-keyword-face prepend))
+      ("\\([@\\]b\\)[ \t\n]+\\([^ \t\n]+\\)"
+       (1 font-lock-keyword-face prepend)
+       (2 'bold prepend))
+      ("\\([@\\]em?\\)[ \t\n]+\\([^ \t\n]+\\)"
+       (1 font-lock-keyword-face prepend)
+       (2 'italic prepend))
+      ("\\([@\\][cp]\\)[ \t\n]+\\([^ \t\n]+\\)"
+       (1 font-lock-keyword-face prepend)
+       (2 'underline prepend)))))
 
 ;;; mode ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
