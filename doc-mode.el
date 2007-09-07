@@ -169,7 +169,7 @@ This may also be a number, describing how far to indent the argument list."
                  (integer :tag "Indent" nil)
                  (const :tag "On" t)))
 
-(defcustom doc-mode-fill-bcolumn nil
+(defcustom doc-mode-fill-column nil
   "*The column at which to break text when formatting it.
 If this is nil, `comment-fill-column' is used."
   :group 'doc-mode
@@ -293,7 +293,7 @@ If this is nil, `comment-fill-column' is used."
         (doc-mode-add-template beg (point))))))
 
 (defun doc-mode-insert-markup (markup &optional argument description)
-  (insert doc-mode-keyword-anchor markup)
+  (insert doc-mode-template-keyword-char markup)
   (when argument
     (insert " ")
     (doc-mode-insert argument))
@@ -401,8 +401,7 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
   "Find the documentation right before POS.
 If there is anything but whitespace between the documentation and POS, nil is
 returned.  Otherwise a cons of the doc's beginning and end is given."
-  (let ((regexps doc-mode-bounds-regexp-alist)
-        end)
+  (let (end)
     (save-excursion
       (goto-char pos)
       (when (re-search-backward "[ \t]*\n[ \t]*\\=" nil t)
