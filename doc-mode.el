@@ -2,7 +2,7 @@
 ;;
 ;; Copyright (C) 2007 Nikolaj Schumacher;;
 ;; Author: Nikolaj Schumacher <bugs * nschum de>
-;; Version: 0.1
+;; Version: 0.1.1
 ;; Keywords: convenience tools
 ;; URL: http://nschum.de/src/emacs/doc-mode/
 ;; Compatibility: GNU Emacs 22.x
@@ -47,6 +47,7 @@
 ;;
 ;;; Changes Log:
 ;;
+;; 2007-09-09 (0.1.1)
 ;;    Fixed return value detection.
 ;;    Actual keyword highlighting.
 ;;
