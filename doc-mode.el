@@ -1,6 +1,6 @@
 ;;; doc-mode.el --- convenient editing of in-code documentation
 ;;
-;; Copyright (C) 2007 Nikolaj Schumacher;;
+;; Copyright (C) 2007 Nikolaj Schumacher
 ;; Author: Nikolaj Schumacher <bugs * nschum de>
 ;; Version: 0.1.1
 ;; Keywords: convenience tools
