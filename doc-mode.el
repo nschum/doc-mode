@@ -47,6 +47,7 @@
 ;;
 ;;; Changes Log:
 ;;
+;;    Fixed return value detection.
 ;;    Actual keyword highlighting.
 ;;
 ;; 2007-09-07 (0.1)
@@ -443,12 +444,12 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
   (and (eq (semantic-tag-class tag) 'function)
        (not (equal (semantic-tag-type tag) "void"))
        (not (semantic-tag-get-attribute tag :constructor-flag))
-       (when (equal (semantic-tag-type tag) "int")
-         ;; semantic bug, constructors sometimes appear to have int type
-         (save-excursion (goto-char (semantic-tag-start tag))
-                         (and (re-search-forward "\\(\\<int\\>\\)\\|{\\|;"
-                                                 (semantic-tag-end tag) t)
-                              (match-beginning 1))))))
+       (or (not (equal (semantic-tag-type tag) "int"))
+           ;; semantic bug, constructors sometimes appear to have int type
+           (save-excursion (goto-char (semantic-tag-start tag))
+                           (and (re-search-forward "\\(\\<int\\>\\)\\|{\\|;"
+                                                   (semantic-tag-end tag) t)
+                                (match-beginning 1))))))
 
 (defun doc-mode-format-tag (tag)
   (cons `(prompt ,(format "Description for %s." (semantic-tag-name tag)))
