@@ -824,7 +824,7 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
             "endxmlonly" "example" "f$" "f[" "f]" "file" "fn" "hideinitializer"
             "htmlinclude" "htmlonly" "if" "ifnot" "image" "include"
             "includelineno" "ingroup" "internal" "invariant" "latexonly" "li"
-            "line" "link" "mainpage" "manonly" "msc" "n" "name" "nosubgrouping"
+            "line" "link" "mainpage" "manonly" "msc" "name" "nosubgrouping"
             "note" "overload" "package" "page" "par" "paragraph"  "post" "pre"
             "private" "privatesection" "property" "protected" "protectedsection"
             "public" "publicsection" "ref" "remarks" "return" "retval" "sa"
@@ -835,6 +835,8 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
             "\\" "&" "~" "<" ">" "#" "%") t)
          "\\>")
        (0 font-lock-keyword-face prepend))
+      ;; don't highlight \n, it's too common in code
+      ("@n" (0 font-lock-keyword-face prepend))
       (,(concat "\\([@\\]"
          (regexp-opt '("class" "struct" "union" "exception" "enum" "throw"
                        "throws") t)
