@@ -38,14 +38,14 @@
 ;; (add-hook 'java-mode-hook 'doc-mode)
 ;; [...]
 ;;
-;; The command `doc-mode-fix-tag-doc' or "C-cd" adds or replaces the
+;; The command `doc-mode-fix-tag-doc' or "C-cdd" adds or replaces the
 ;; documentation for the function, variable, or class at point.
-;; `doc-mode-remove-tag-doc' or "C-cr" removes it.
+;; `doc-mode-remove-tag-doc' or "C-cdr" removes it.
 ;;
 ;; You can fold the comments by using `doc-mode-toggle-tag-doc-folding' or
 ;; `doc-mode-fold-all'.
 ;;
-;;; Changes Log:
+;;; Change Log:
 ;;
 ;; 2007-09-09 (0.1.1)
 ;;    Fixed return value detection.
