@@ -47,6 +47,8 @@
 ;;
 ;;; Change Log:
 ;;
+;;    Added `doc-mode-keywords-from-tag-func' as customizable option.
+;;
 ;; 2007-09-09 (0.1.1)
 ;;    Fixed return value detection.
 ;;    Actual keyword highlighting.
@@ -179,6 +181,17 @@ If this is nil, `comment-fill-column' is used."
   :group 'doc-mode
   :type '(choice (const :tag "Default" nil)
                  (integer :tag "Fill Column")))
+
+(defcustom doc-mode-keywords-from-tag-func 'doc-mode-keywords-from-tag
+  "*Function used to generate keywords for a tag.
+This must be a function that takes two arguments.  The first argument is the
+Semantic tag for which to generate keywords, the second is a list of existing
+keywords taken from the current doc comment.  It should return the new list of
+keywords.  Each element in a keyword list can be either a string or a list with
+a keyword, optional argument and optional description.  Additional entries with
+undetermined content should be created with `doc-mode-new-keyword'."
+  :group 'doc-mode
+  :type 'function)
 
 (defun doc-mode-current-tag ()
   (when (semantic-parse-tree-unparseable-p)
@@ -452,15 +465,6 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
                                                    (semantic-tag-end tag) t)
                                 (match-beginning 1))))))
 
-(defun doc-mode-format-tag (tag)
-  (cons `(prompt ,(format "Description for %s." (semantic-tag-name tag)))
-        (nconc (mapcar (lambda (argument)
-                         (doc-mode-new-keyword "param"
-                                               (semantic-tag-name argument)))
-                       (semantic-tag-get-attribute tag :arguments))
-               (when (doc-mode-has-return-value-p tag)
-                 (list (doc-mode-new-keyword "return"))))))
-
 ;;; extracting ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun doc-mode-extract-summary (beg end)
@@ -592,7 +596,7 @@ Returns (length LIST) if no occurrence was found."
   (let ((lists (make-vector (1+ (length doc-mode-template-keywords)) nil))
         description)
     (dolist (k keywords)
-      (if (stringp k)
+      (if (or (stringp k) (and (eq (car k) 'prompt)))
           (push k description)
         (push k (elt lists (doc-mode-position (car k)
                                               doc-mode-template-keywords)))))
@@ -621,33 +625,42 @@ Returns (length LIST) if no occurrence was found."
         (push k result)))
     result))
 
+(defun doc-mode-keywords-from-tag (tag keywords)
+  "Create keywords for a Semantic TAG, taking descriptions from old KEYWORDS"
+  ;; fix parameters
+  (let ((missing (doc-mode-missing-parameters keywords tag))
+        (invalid (doc-mode-invalid-parameters keywords tag)))
+    (if (= (length missing) (length invalid))
+        (while missing
+          (setcar (cdr (pop invalid)) (cadr (pop missing))))
+      (setq keywords (nconc keywords missing)))
+    keywords)
+  ;; fix return value
+  (if (doc-mode-has-return-value-p tag)
+      ;; add
+      (unless (doc-mode-find-keyword "return" keywords)
+        (push (doc-mode-new-keyword "return") keywords))
+    ;; remove
+    (setq keywords (doc-mode-filter-keyword "return" keywords)))
+  (unless (stringp (car keywords))
+    (push `(prompt ,(format "Description for %s." (semantic-tag-name tag)))
+          keywords))
+  (doc-mode-sort-keywords keywords tag))
+
 ;;;###autoload
 (defun doc-mode-fix-tag-doc (tag)
   (interactive (list (doc-mode-current-tag-or-bust)))
-  (let ((bounds (doc-mode-find-doc-bounds (semantic-tag-start tag))))
-    (if (null bounds)
-        (doc-mode-add-tag-doc tag)
-      (let* ((beg (plist-get bounds :beg))
-             (end (plist-get bounds :end))
-             (keywords (doc-mode-extract-keywords beg end))
-             (missing (doc-mode-missing-parameters keywords tag))
-             (invalid (doc-mode-invalid-parameters keywords tag)))
-        ;; fix parameters
-        (if (= (length missing) (length invalid))
-            (while missing
-              (setcar (cdr (pop invalid)) (cadr (pop missing))))
-          (setq keywords (nconc keywords missing)))
-        ;; fix return value
-        (if (doc-mode-has-return-value-p tag)
-            ;; add
-            (unless (doc-mode-find-keyword "return" keywords)
-              (push (doc-mode-new-keyword "return") keywords))
-          ;; remove
-          (setq keywords (doc-mode-filter-keyword "return" keywords)))
-        (doc-mode-remove-tag-doc tag)
-        (doc-mode-insert-doc (doc-mode-sort-keywords keywords tag)
-                             (semantic-tag-start tag))))))
+  (let* ((bounds (doc-mode-find-doc-bounds (semantic-tag-start tag)))
+         (keywords (funcall doc-mode-keywords-from-tag-func
+                            tag (when bounds
+                                  (doc-mode-extract-keywords
+                                   (plist-get bounds :beg)
+                                   (plist-get bounds :end))))))
+    (doc-mode-remove-tag-doc tag)
+    (doc-mode-insert-doc keywords (semantic-tag-start tag))))
 
+;;;###autoload
+(defalias 'doc-mode-add-tag-doc 'doc-mode-fix-tag-doc)
 
 (defun doc-mode-format-message (type &optional parameters)
   (if (eq type 'none)
@@ -912,13 +925,6 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
 
   (when font-lock-mode
     (font-lock-fontify-buffer)))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;;;###autoload
-(defun doc-mode-add-tag-doc (tag)
-  (interactive (list (doc-mode-current-tag-or-bust)))
-  (doc-mode-insert-doc (doc-mode-format-tag tag) (semantic-tag-start tag)))
 
 (provide 'doc-mode)
 
