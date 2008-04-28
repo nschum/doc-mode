@@ -333,14 +333,12 @@ undetermined content should be created with `doc-mode-new-keyword'."
 
 (defun doc-mode-insert-keyword (keyword indent)
   (indent-to-column indent)
-  (let* (;;(line (apply 'doc-mode-markup keyword))
-         (beg (point))
-         (fill-column (or doc-mode-fill-column comment-fill-column fill-column))
-         (fill-prefix (when doc-mode-align-keyword-arguments
-                        (concat (buffer-substring (point-at-bol) (point))
-                                doc-mode-template-continue
-                                (make-string (doc-mode-line-indent keyword) ? )
-                                ))))
+  (let ((fill-column (or doc-mode-fill-column comment-fill-column fill-column))
+        (fill-prefix (when doc-mode-align-keyword-arguments
+                       (concat (buffer-substring (point-at-bol) (point))
+                               doc-mode-template-continue
+                               (make-string (doc-mode-line-indent keyword)
+                                            ? )))))
     (doc-mode-insert-line keyword indent)))
 
 (defun doc-mode-insert-doc (keywords &optional pos)
@@ -443,11 +441,6 @@ returned.  Otherwise a cons of the doc's beginning and end is given."
             `(:beg ,(point) :end ,end :column ,(current-column)))))))))
 
 ;;; formating ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defun doc-mode-markup (markup &optional argument description)
-  (concat "@" markup
-          (when argument " ") argument
-          (when description " ") description))
 
 (defun doc-mode-new-keyword (keyword &optional argument)
   (if (equal keyword "param")
@@ -810,8 +803,6 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
   (unless doc-mode
     (error "doc-mode not enabled"))
   (doc-mode-unfold-doc (semantic-tag-start tag)))
-
-;;; all
 
 ;;;###autoload
 (defun doc-mode-fold-all (&optional arg)
