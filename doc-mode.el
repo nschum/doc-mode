@@ -537,18 +537,16 @@ argument value) or (keyword argument)."
                                             (plist-get bounds :end)))))
 
 (defun doc-mode-find-keyword (keyword keywords)
-  (let (results)
-    (dolist (k keywords)
-      (when (and (consp k) (string= (car k) keyword))
-        (push k results)))
-    (nreverse results)))
+  (when keywords
+    (if (and (consp (car keywords)) (string= (car (car keywords)) keyword))
+        (cons (car keywords) (doc-mode-find-keyword keyword (cdr keywords)))
+      (doc-mode-find-keyword keyword (cdr keywords)))))
 
 (defun doc-mode-filter-keyword (keyword keywords)
-  (let (results)
-    (dolist (k keywords)
-      (unless (and (consp k) (string= (car k) keyword))
-        (push k results)))
-    (nreverse results)))
+  (when keywords
+    (if (and (consp (car keywords)) (string= (car (car keywords)) keyword))
+        (doc-mode-filter-keyword keyword (cdr keywords))
+      (cons (car keywords) (doc-mode-filter-keyword keyword (cdr keywords))))))
 
 (defun doc-mode-find-eligible-tags ()
   (when buffer-file-name
