@@ -48,6 +48,7 @@
 ;;; Change Log:
 ;;
 ;;    Added `doc-mode-keywords-from-tag-func' as customizable option.
+;;    Improved parameter list change recognition.
 ;;
 ;; 2007-09-09 (0.1.1)
 ;;    Fixed return value detection.
@@ -537,6 +538,11 @@ argument value) or (keyword argument)."
             results))
     (nreverse results)))
 
+(defun doc-mode-extract-keywords-for-tag (tag)
+  (let ((bounds (doc-mode-find-doc-bounds (semantic-tag-start tag))))
+    (when bounds (doc-mode-extract-keywords (plist-get bounds :beg)
+                                            (plist-get bounds :end)))))
+
 (defun doc-mode-find-keyword (keyword keywords)
   (let (results)
     (dolist (k keywords)
@@ -625,37 +631,48 @@ Returns (length LIST) if no occurrence was found."
         (push k result)))
     result))
 
+(defun doc-mode-update-parameters (old new)
+  "Cleanse and sort NEW parameters according to OLD parameter list."
+  (let (params car-new)
+    (while (setq car-new (pop new))
+      (push (or (dolist (p old) ;; search for match in old
+                  (when (equal (cadr p) car-new)
+                    (setq old (delete p old))
+                    (return p)))
+                ;; this parameter wasn't there before
+                (if (or (null old) (member (cadr (car old)) new))
+                    ;; insertion, new
+                    (doc-mode-new-keyword "param" car-new)
+                  ;; the old parameter at this pos isn't there anymore, rename
+                  (list* "param" car-new (cddr (pop old)))))
+            params))
+    (nreverse params)))
+
 (defun doc-mode-keywords-from-tag (tag keywords)
   "Create keywords for a Semantic TAG, taking descriptions from old KEYWORDS"
-  ;; fix parameters
-  (let ((missing (doc-mode-missing-parameters keywords tag))
-        (invalid (doc-mode-invalid-parameters keywords tag)))
-    (if (= (length missing) (length invalid))
-        (while missing
-          (setcar (cdr (pop invalid)) (cadr (pop missing))))
-      (setq keywords (nconc keywords missing)))
-    keywords)
-  ;; fix return value
-  (if (doc-mode-has-return-value-p tag)
-      ;; add
-      (unless (doc-mode-find-keyword "return" keywords)
-        (push (doc-mode-new-keyword "return") keywords))
-    ;; remove
-    (setq keywords (doc-mode-filter-keyword "return" keywords)))
-  (unless (stringp (car keywords))
-    (push `(prompt ,(format "Description for %s." (semantic-tag-name tag)))
-          keywords))
-  (doc-mode-sort-keywords keywords tag))
+  (let ((old-params (doc-mode-find-keyword "param" keywords))
+        (new-params (mapcar 'semantic-tag-name
+                            (semantic-tag-get-attribute tag :arguments))))
+    ;; fix return value
+    (if (doc-mode-has-return-value-p tag)
+        ;; add
+        (unless (doc-mode-find-keyword "return" keywords)
+          (push (doc-mode-new-keyword "return") keywords))
+      ;; remove
+      (setq keywords (doc-mode-filter-keyword "return" keywords)))
+    (unless (stringp (car keywords))
+      (push `(prompt ,(format "Description for %s." (semantic-tag-name tag)))
+            keywords))
+    (doc-mode-sort-keywords (nconc (doc-mode-update-parameters old-params
+                                                               new-params)
+                                   (doc-mode-filter-keyword "param" keywords))
+                            tag)))
 
 ;;;###autoload
 (defun doc-mode-fix-tag-doc (tag)
   (interactive (list (doc-mode-current-tag-or-bust)))
-  (let* ((bounds (doc-mode-find-doc-bounds (semantic-tag-start tag)))
-         (keywords (funcall doc-mode-keywords-from-tag-func
-                            tag (when bounds
-                                  (doc-mode-extract-keywords
-                                   (plist-get bounds :beg)
-                                   (plist-get bounds :end))))))
+  (let ((keywords (funcall doc-mode-keywords-from-tag-func
+                           tag (doc-mode-extract-keywords-for-tag tag))))
     (doc-mode-remove-tag-doc tag)
     (doc-mode-insert-doc keywords (semantic-tag-start tag))))
 
