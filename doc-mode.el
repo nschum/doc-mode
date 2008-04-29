@@ -49,6 +49,8 @@
 ;;
 ;;    Added `doc-mode-keywords-from-tag-func' as customizable option.
 ;;    Improved parameter list change recognition.
+;;    `doc-mode-jump-to-template' now enables jumping to the latest comment.
+;;    `doc-mode-first-template' now jumps to the first template in this buffer.
 ;;
 ;; 2007-09-09 (0.1.1)
 ;;    Fixed return value detection.
@@ -248,47 +250,48 @@ undetermined content should be created with `doc-mode-new-keyword'."
       (delete-region (overlay-start ov) (overlay-end ov)))))
 
 ;;;###autoload
-(defun doc-mode-next-template ()
-  "Jump to the next unfinished documentation template."
+(defun doc-mode-next-template (&optional pos limit)
+  "Jump to the next unfinished documentation template in this buffer."
   (interactive)
-  (let ((min-start (point-max))
-        (pos (point))
+  (unless pos (setq pos (point)))
+  (unless limit (setq limit (point-max)))
+  (let ((min-start limit)
         start)
     (dolist (ov doc-mode-templates)
       (setq start (overlay-start ov))
       (and (> start pos)
            (< start min-start)
            (setq min-start start)))
-    (when (= min-start (point-max))
+    (when (= min-start limit)
       (error "End of buffer"))
     (push-mark)
     (goto-char min-start)))
 
 ;;;###autoload
-(defun doc-mode-previous-template ()
-  "Jump to the previous unfinished documentation template."
+(defun doc-mode-previous-template (&optional pos limit)
+  "Jump to the previous unfinished documentation template in this buffer."
   (interactive)
-  (let ((max-start (point-min))
-        (pos (point))
+  (unless pos (setq pos (point)))
+  (unless limit (setq limit (point-min)))
+  (let ((max-start limit)
         start)
     (dolist (ov doc-mode-templates)
       (setq start (overlay-start ov))
       (and (< start pos)
            (> start max-start)
            (setq max-start start)))
-    (when (= max-start (point-min))
+    (when (= max-start limit)
       (error "Beginning of buffer"))
     (push-mark)
     (goto-char max-start)))
 
 ;;;###autoload
 (defun doc-mode-first-template ()
-  "Jump to the oldest unfinished documentation template."
+  "Jump to the first unfinished documentation template in this buffer."
   (interactive)
-  (unless doc-mode-templates
-    (error "No template found"))
-  (push-mark)
-  (goto-char (overlay-start (car (last doc-mode-templates)))))
+  (condition-case err
+      (doc-mode-next-template (point-min))
+    (error (error "No template found"))))
 
 ;;; insertion ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -345,7 +348,9 @@ undetermined content should be created with `doc-mode-new-keyword'."
   "Insert a documentation at POS.
 LINES is a list of keywords."
   (save-excursion
-    (when pos (goto-char pos))
+    (if pos
+        (goto-char pos)
+      (setq pos (point)))
     (let ((indent (current-column)))
 
       (if (and (not (cdr keywords)) doc-mode-allow-single-line-comments)
@@ -388,7 +393,7 @@ LINES is a list of keywords."
         (move-to-column indent t))))
 
     (and doc-mode-jump-to-template doc-mode-templates
-         (doc-mode-first-template)))
+         (ignore-errors (doc-mode-next-template pos (point)))))
 
 (defun doc-mode-remove-doc (point)
   "Remove the documentation before POINT."
