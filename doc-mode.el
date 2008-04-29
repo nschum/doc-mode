@@ -604,24 +604,6 @@ Returns (length LIST) if no occurrence was found."
                             result)))
       (nconc (nreverse description) result))))
 
-(defun doc-mode-missing-parameters (keywords tag)
-  (let ((parameters (mapcar 'cadr (doc-mode-find-keyword "param" keywords)))
-        result)
-    (dolist (k (mapcar 'semantic-tag-name
-                       (semantic-tag-get-attribute tag :arguments)))
-      (unless (member k parameters)
-        (push (doc-mode-new-keyword "param" k) result)))
-    result))
-
-(defun doc-mode-invalid-parameters (keywords tag)
-  (let ((parameters (mapcar 'semantic-tag-name
-                            (semantic-tag-get-attribute tag :arguments)))
-        result)
-    (dolist (k (doc-mode-find-keyword "param" keywords))
-      (unless (member (cadr k) parameters)
-        (push k result)))
-    result))
-
 (defun doc-mode-update-parameters (old new)
   "Cleanse and sort NEW parameters according to OLD parameter list."
   (let (params car-new)
@@ -665,65 +647,74 @@ Returns (length LIST) if no occurrence was found."
   (let ((keywords (funcall doc-mode-keywords-from-tag-func
                            tag (doc-mode-extract-keywords-for-tag tag))))
     (doc-mode-remove-tag-doc tag)
-    (doc-mode-insert-doc keywords (semantic-tag-start tag))))
+    (doc-mode-insert-doc keywords (semantic-tag-start tag))
+    ;; update lighter
+    (doc-mode-check-buffer)))
 
 ;;;###autoload
 (defalias 'doc-mode-add-tag-doc 'doc-mode-fix-tag-doc)
 
-(defun doc-mode-format-message (type &optional parameters)
-  (if (eq type 'none)
-      "No documentation:"
-    (when parameters
-      (concat (case type
-                ('missing "Missing")
-                ('invalid "Invalid"))
-              " parameter" (when (cdr parameters) "s") ": "
-              (mapconcat 'identity (mapcar 'cadr parameters) ", ")))))
+(defun doc-mode-format-message (type parameters)
+  (when parameters
+    (concat (case type
+              ('missing "Missing")
+              ('invalid "Invalid"))
+            " parameter" (when (cdr parameters) "s") ": "
+            (mapconcat 'identity parameters ", "))))
 
-
-(defun doc-mode-check-tag-doc (tag)
-  (let ((bounds (doc-mode-find-doc-bounds (semantic-tag-start tag))))
-    (if bounds
-        (let* ((beg (plist-get bounds :beg))
-               (end (plist-get bounds :end))
-               (keywords (doc-mode-extract-keywords beg end))
-               (missing (doc-mode-format-message 'missing
-                                                 (doc-mode-missing-parameters
-                                                  keywords tag)))
-               (invalid (doc-mode-format-message 'invalid
-                                                 (doc-mode-invalid-parameters
-                                                  keywords tag))))
-          (or (and invalid missing
-                   (concat invalid "\n" missing))
-              invalid
-              missing))
-      (doc-mode-format-message 'none))))
-
-(defun doc-mode-first-faulty-tag-doc ()
-  (let ((tags (doc-mode-find-eligible-tags)) invalid)
-    (while tags
-      (if (setq invalid (doc-mode-check-tag-doc (car tags)))
-          (setq invalid (cons (car tags) invalid) tags nil)
-        (pop tags)))
-    invalid))
+;;;###autoload
+(defun doc-mode-check-tag-doc (tag &optional print-message-p)
+  (interactive (list (doc-mode-current-tag-or-bust) t))
+  (let* ((actual (doc-mode-extract-keywords-for-tag tag))
+         (expected (mapcar 'semantic-tag-name
+                           (semantic-tag-get-attribute tag :arguments))))
+    (if actual
+        (let ((no-doc-p (not (stringp (car actual))))
+              ;; we only report parameters
+              (actual (mapcar 'cadr (doc-mode-find-keyword "param"
+                                                           actual)))
+              invalid)
+          (dolist (keyword actual)
+            (if (member keyword expected)
+                (setq expected (delete keyword expected))
+              (push keyword invalid)))
+          (when print-message-p
+            (message "%s" (concat (and no-doc-p "Missing documentation")
+                                  (and no-doc-p expected "\n")
+                                  (doc-mode-format-message 'missing expected)
+                                  (and (or no-doc-p expected) invalid "\n")
+                                  (doc-mode-format-message 'invalid invalid))))
+          (or no-doc-p expected invalid))
+      (when print-message-p
+        (message "Missing comment"))
+      t)))
 
 ;;;###autoload
 (defun doc-mode-check-buffer ()
   (interactive)
-  (let ((invalid-p (doc-mode-first-faulty-tag-doc)))
-    (setq doc-mode-lighter (if invalid-p " doc!" " doc"))
-    invalid-p))
+  (kill-local-variable 'doc-mode-lighter)
+  (dolist (tag (doc-mode-find-eligible-tags))
+    (when (doc-mode-check-tag-doc tag)
+      (set (make-local-variable 'doc-mode-lighter) " doc!")
+      (return t))))
+
+(defun doc-mode-first-faulty-tag-doc ()
+  (dolist (tag (sort (doc-mode-find-eligible-tags)
+                     (lambda (a b) (< (semantic-tag-start a)
+                                      (semantic-tag-start b)))))
+    (when (doc-mode-check-tag-doc tag)
+      (return tag))))
 
 ;;;###autoload
 (defun doc-mode-next-faulty-doc ()
   "Jump to the next faulty documentation and print error."
   (interactive)
-  (let ((tag (doc-mode-first-faulty-tag-doc)))
-    (if (null tag)
-        (message "Documentation checked")
-      (push-mark)
-      (goto-char (semantic-tag-start (car tag)))
-      (message "%s" (cdr tag)))))
+  (let ((tag (or (doc-mode-first-faulty-tag-doc)
+                 (error "End of buffer"))))
+    (push-mark)
+    (goto-char (semantic-tag-start tag))
+    ;; check again with message
+    (doc-mode-check-tag-doc tag t)))
 
 ;;; folding ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
