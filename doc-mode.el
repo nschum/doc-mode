@@ -67,8 +67,6 @@
                              "^Semantic can't parse buffer$"
                              "^No template found$"
                              "^doc-mode not enabled$"
-                             "^Beginning of buffer$"
-                             "^End of buffer$"
                              . ,debug-ignored-errors))
 
 ;; semantic-after-auto-parse-hooks
