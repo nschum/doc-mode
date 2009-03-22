@@ -1,8 +1,8 @@
 ;;; doc-mode.el --- convenient editing of in-code documentation
 ;;
-;; Copyright (C) 2007 Nikolaj Schumacher
+;; Copyright (C) 2007, 2009 Nikolaj Schumacher
 ;; Author: Nikolaj Schumacher <bugs * nschum de>
-;; Version: 0.1.1
+;; Version: 0.2
 ;; Keywords: convenience tools
 ;; URL: http://nschum.de/src/emacs/doc-mode/
 ;; Compatibility: GNU Emacs 22.x, GNU Emacs 23.x
@@ -44,7 +44,7 @@
 ;;
 ;;; Change Log:
 ;;
-;;    Changed prefix key from C-cd to C-cC-d.
+;; 2009-03-22 (0.2)
 ;;    Added `doc-mode-keywords-from-tag-func' as customizable option.
 ;;    Improved parameter list change recognition.
 ;;    `doc-mode-jump-to-template' now enables jumping to the latest comment.
