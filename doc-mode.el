@@ -5,7 +5,7 @@
 ;; Version: 0.1.1
 ;; Keywords: convenience tools
 ;; URL: http://nschum.de/src/emacs/doc-mode/
-;; Compatibility: GNU Emacs 22.x
+;; Compatibility: GNU Emacs 22.x, GNU Emacs 23.x
 ;;
 ;; This file is NOT part of GNU Emacs.
 ;;
