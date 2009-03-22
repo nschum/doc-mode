@@ -63,11 +63,9 @@
 (require 'cc-mode)
 (require 'newcomment) ;comment-fill-column
 
-(setq debug-ignored-errors `("^No tag found$"
-                             "^Semantic can't parse buffer$"
-                             "^No template found$"
-                             "^doc-mode not enabled$"
-                             . ,debug-ignored-errors))
+(dolist (err `("^No tag found$" "^Semantic can't parse buffer$"
+               "^No template found$" "^doc-mode not enabled$"))
+  (add-to-list 'debug-ignored-errors err))
 
 ;; semantic-after-auto-parse-hooks
 
