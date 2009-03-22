@@ -34,9 +34,7 @@
 ;;
 ;; Add the following to your .emacs file:
 ;; (require 'doc-mode)
-;; (add-hook 'c++-mode-hook 'doc-mode)
-;; (add-hook 'java-mode-hook 'doc-mode)
-;; [...]
+;; (add-hook 'c-mode-common-hook 'doc-mode)
 ;;
 ;; The command `doc-mode-fix-tag-doc' or "C-cdd" adds or replaces the
 ;; documentation for the function, variable, or class at point.
