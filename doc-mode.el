@@ -44,6 +44,7 @@
 ;;
 ;;; Change Log:
 ;;
+;;    Changed prefix key from C-cd to C-cC-d.
 ;;    Added `doc-mode-keywords-from-tag-func' as customizable option.
 ;;    Improved parameter list change recognition.
 ;;    `doc-mode-jump-to-template' now enables jumping to the latest comment.
@@ -73,13 +74,6 @@
   "Minor mode for editing in-code documentation."
   :group 'convenience
   :group 'tools)
-
-(defcustom doc-mode-prefix-key "\C-cd"
-  "*Prefix key to use for `doc-mode'.
-The value of this variable is checked as part of loading Outline mode.
-After that, changing the prefix key requires manipulating keymaps."
-  :group 'doc-mode
-  :type 'string)
 
 (defcustom doc-mode-auto-check-p t
   "*Should the buffer documentation be checked after a Semantic reparse."
@@ -339,10 +333,16 @@ undetermined content should be created with `doc-mode-new-keyword'."
     (define-key map "\C-u" 'doc-mode-unfold-all)
     map))
 
+(defvar doc-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map "\C-c\C-d" doc-mode-prefix-map)
+    map)
+  "Keymap used for `doc-mode'.")
+
 ;;;###autoload
 (define-minor-mode doc-mode
   "Minor mode for editing in-code documentation."
-  nil doc-mode-lighter (list (cons doc-mode-prefix-key doc-mode-prefix-map))
+  nil doc-mode-lighter doc-mode-map
   (if doc-mode
       (progn
         (font-lock-add-keywords nil doc-mode-font-lock-keywords)
