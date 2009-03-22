@@ -196,31 +196,64 @@ undetermined content should be created with `doc-mode-new-keyword'."
   :group 'doc-mode
   :type 'function)
 
-(defun doc-mode-current-tag ()
-  (when (semantic-parse-tree-unparseable-p)
-    (error "Semantic can't parse buffer"))
-  (when (or (semantic-parse-tree-needs-rebuild-p)
-            (semantic-parse-tree-needs-update-p))
-    (condition-case nil
-        (semantic-fetch-tags)
-      (error (error "Semantic can't parse buffer"))))
-  (save-excursion
-    (or (semantic-current-tag-of-class 'function)
-        (semantic-current-tag-of-class 'variable)
-        (progn (beginning-of-line) (skip-chars-forward " \t\n") nil)
-        (semantic-current-tag-of-class 'function)
-        (semantic-current-tag-of-class 'variable)
-        (if (not (looking-at "/\\*\\*"))
-            (semantic-current-tag-of-class 'type)
-          (progn (search-forward "*/" nil t)
-                 (skip-chars-forward " \t\n")
-                 nil))
-        (semantic-current-tag-of-class 'function)
-        (semantic-current-tag-of-class 'variable)
-        (semantic-current-tag-of-class 'type))))
+;;; keywords ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun doc-mode-current-tag-or-bust ()
-  (or (doc-mode-current-tag) (error "No tag found")))
+(defconst doc-mode-font-lock-keywords
+  (eval-when-compile
+    `((,(concat "[\\@]"
+         (regexp-opt
+          '("addindex" "addtogroup" "anchor" "arg" "author" "brief" "callgraph"
+            "callergraph" "category" "code" "cond" "copydoc" "date" "defgroup"
+            "deprecated" "details" "dir" "dontinclude" "dot" "dotfile" "e"
+            "else" "elseif" "em" "endcode" "endcond" "enddot" "endhtmlonly"
+            "endif" "endlatexonly" "endlink" "endmanonly" "endmsc" "endverbatim"
+            "endxmlonly" "example" "f$" "f[" "f]" "file" "fn" "hideinitializer"
+            "htmlinclude" "htmlonly" "if" "ifnot" "image" "include"
+            "includelineno" "ingroup" "internal" "invariant" "latexonly" "li"
+            "line" "link" "mainpage" "manonly" "msc" "name" "nosubgrouping"
+            "note" "overload" "package" "page" "par" "paragraph"  "post" "pre"
+            "private" "privatesection" "property" "protected" "protectedsection"
+            "public" "publicsection" "ref" "remarks" "return" "retval" "sa"
+            "section" "see" "serial" "serialData" "serialField"
+            "showinitializer" "since" "skip" "skipline" "subpage" "subsection"
+            "subsubsection" "test" "typedef" "until" "defvar" "verbatim"
+            "verbinclude" "version" "weakgroup" "xmlonly" "xrefitem" "$" "@"
+            "\\" "&" "~" "<" ">" "#" "%") t)
+         "\\>")
+       (0 font-lock-keyword-face prepend))
+      ;; don't highlight \n, it's too common in code
+      ("@n" (0 font-lock-keyword-face prepend))
+      (,(concat "\\([@\\]"
+         (regexp-opt '("class" "struct" "union" "exception" "enum" "throw"
+                       "throws") t)
+         "\\)\\>\\(?:[ \t]+\\(\\sw+\\)\\)?")
+       (1 font-lock-keyword-face prepend)
+       (3 font-lock-type-face prepend))
+      (,(concat "\\([@\\]"
+         (regexp-opt '("param" "param[in]" "param[out]" "param[in+out]" "a"
+                       "namespace" "relates" "relatesalso" "def") t)
+         "\\)\\>\\(?:[ \t]+\\(\\sw+\\)\\)?")
+       (1 font-lock-keyword-face prepend)
+       (3 font-lock-variable-name-face prepend))
+      (,(concat "\\([@\\]retval\\)\\>\\(?:[ \t]+\\(\\sw+\\)\\)?")
+       (1 font-lock-keyword-face prepend)
+       (2 font-lock-function-name-face prepend))
+      (,(concat "[@\\]" (regexp-opt '("attention" "warning" "todo" "bug") t)
+                "\\>")
+       (0 font-lock-warning-face prepend))
+      (,(concat "{@"
+         (regexp-opt '("docRoot" "inheritDoc" "link" "linkplain" "value") t)
+         "}")
+       (0 font-lock-keyword-face prepend))
+      ("\\([@\\]b\\)[ \t\n]+\\([^ \t\n]+\\)"
+       (1 font-lock-keyword-face prepend)
+       (2 'bold prepend))
+      ("\\([@\\]em?\\)[ \t\n]+\\([^ \t\n]+\\)"
+       (1 font-lock-keyword-face prepend)
+       (2 'italic prepend))
+      ("\\([@\\][cp]\\)[ \t\n]+\\([^ \t\n]+\\)"
+       (1 font-lock-keyword-face prepend)
+       (2 'underline prepend)))))
 
 ;;; templates ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -292,6 +325,78 @@ undetermined content should be created with `doc-mode-new-keyword'."
   (condition-case err
       (doc-mode-next-template (point-min))
     (error (error "No template found"))))
+
+;;; mode ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defvar doc-mode-lighter " doc")
+
+(defvar doc-mode-prefix-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map "d" 'doc-mode-fix-tag-doc)
+    (define-key map "c" 'doc-mode-check-tag-doc)
+    (define-key map "t" 'doc-mode-toggle-tag-doc-folding)
+    (define-key map "f" 'doc-mode-fold-tag-doc)
+    (define-key map "u" 'doc-mode-unfold-tag-doc)
+    (define-key map "r" 'doc-mode-remove-tag-doc)
+    (define-key map "i" 'doc-mode-add-tag-doc)
+    (define-key map "e" 'doc-mode-next-faulty-doc)
+    (define-key map "n" 'doc-mode-next-template)
+    (define-key map "\C-c" 'doc-mode-check-buffer)
+    (define-key map "\C-f" 'doc-mode-fold-all)
+    (define-key map "\C-u" 'doc-mode-unfold-all)
+    map))
+
+;;;###autoload
+(define-minor-mode doc-mode
+  "Minor mode for editing in-code documentation."
+  nil doc-mode-lighter (list (cons doc-mode-prefix-key doc-mode-prefix-map))
+  (if doc-mode
+      (progn
+        (font-lock-add-keywords nil doc-mode-font-lock-keywords)
+        (when doc-mode-auto-check-p
+          (add-hook 'semantic-after-auto-parse-hooks 'doc-mode-check-buffer
+                    nil t)
+          (add-hook 'semantic-after-idle-scheduler-reparse-hooks
+                    'doc-mode-check-buffer nil t)))
+    (dolist (ov doc-mode-templates)
+      (delete-overlay ov))
+    (kill-local-variable 'doc-mode-templates)
+    (doc-mode-unfold-all)
+    (font-lock-remove-keywords nil doc-mode-font-lock-keywords)
+    (remove-hook 'semantic-after-auto-parse-hooks 'doc-mode-check-buffer t)
+    (remove-hook 'semantic-after-idle-scheduler-reparse-hooks
+                 'doc-mode-check-buffer t))
+
+  (when font-lock-mode
+    (font-lock-fontify-buffer)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun doc-mode-current-tag ()
+  (when (semantic-parse-tree-unparseable-p)
+    (error "Semantic can't parse buffer"))
+  (when (or (semantic-parse-tree-needs-rebuild-p)
+            (semantic-parse-tree-needs-update-p))
+    (condition-case nil
+        (semantic-fetch-tags)
+      (error (error "Semantic can't parse buffer"))))
+  (save-excursion
+    (or (semantic-current-tag-of-class 'function)
+        (semantic-current-tag-of-class 'variable)
+        (progn (beginning-of-line) (skip-chars-forward " \t\n") nil)
+        (semantic-current-tag-of-class 'function)
+        (semantic-current-tag-of-class 'variable)
+        (if (not (looking-at "/\\*\\*"))
+            (semantic-current-tag-of-class 'type)
+          (progn (search-forward "*/" nil t)
+                 (skip-chars-forward " \t\n")
+                 nil))
+        (semantic-current-tag-of-class 'function)
+        (semantic-current-tag-of-class 'variable)
+        (semantic-current-tag-of-class 'type))))
+
+(defun doc-mode-current-tag-or-bust ()
+  (or (doc-mode-current-tag) (error "No tag found")))
 
 ;;; insertion ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -824,109 +929,6 @@ If called interactively, use the tag given by `doc-mode-current-tag'."
   (interactive (list (doc-mode-current-tag-or-bust)))
   (or (doc-mode-unfold-tag-doc tag)
       (doc-mode-fold-tag-doc tag)))
-
-;;; keywords ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defconst doc-mode-font-lock-keywords
-  (eval-when-compile
-    `((,(concat "[\\@]"
-         (regexp-opt
-          '("addindex" "addtogroup" "anchor" "arg" "author" "brief" "callgraph"
-            "callergraph" "category" "code" "cond" "copydoc" "date" "defgroup"
-            "deprecated" "details" "dir" "dontinclude" "dot" "dotfile" "e"
-            "else" "elseif" "em" "endcode" "endcond" "enddot" "endhtmlonly"
-            "endif" "endlatexonly" "endlink" "endmanonly" "endmsc" "endverbatim"
-            "endxmlonly" "example" "f$" "f[" "f]" "file" "fn" "hideinitializer"
-            "htmlinclude" "htmlonly" "if" "ifnot" "image" "include"
-            "includelineno" "ingroup" "internal" "invariant" "latexonly" "li"
-            "line" "link" "mainpage" "manonly" "msc" "name" "nosubgrouping"
-            "note" "overload" "package" "page" "par" "paragraph"  "post" "pre"
-            "private" "privatesection" "property" "protected" "protectedsection"
-            "public" "publicsection" "ref" "remarks" "return" "retval" "sa"
-            "section" "see" "serial" "serialData" "serialField"
-            "showinitializer" "since" "skip" "skipline" "subpage" "subsection"
-            "subsubsection" "test" "typedef" "until" "defvar" "verbatim"
-            "verbinclude" "version" "weakgroup" "xmlonly" "xrefitem" "$" "@"
-            "\\" "&" "~" "<" ">" "#" "%") t)
-         "\\>")
-       (0 font-lock-keyword-face prepend))
-      ;; don't highlight \n, it's too common in code
-      ("@n" (0 font-lock-keyword-face prepend))
-      (,(concat "\\([@\\]"
-         (regexp-opt '("class" "struct" "union" "exception" "enum" "throw"
-                       "throws") t)
-         "\\)\\>\\(?:[ \t]+\\(\\sw+\\)\\)?")
-       (1 font-lock-keyword-face prepend)
-       (3 font-lock-type-face prepend))
-      (,(concat "\\([@\\]"
-         (regexp-opt '("param" "param[in]" "param[out]" "param[in+out]" "a"
-                       "namespace" "relates" "relatesalso" "def") t)
-         "\\)\\>\\(?:[ \t]+\\(\\sw+\\)\\)?")
-       (1 font-lock-keyword-face prepend)
-       (3 font-lock-variable-name-face prepend))
-      (,(concat "\\([@\\]retval\\)\\>\\(?:[ \t]+\\(\\sw+\\)\\)?")
-       (1 font-lock-keyword-face prepend)
-       (2 font-lock-function-name-face prepend))
-      (,(concat "[@\\]" (regexp-opt '("attention" "warning" "todo" "bug") t)
-                "\\>")
-       (0 font-lock-warning-face prepend))
-      (,(concat "{@"
-         (regexp-opt '("docRoot" "inheritDoc" "link" "linkplain" "value") t)
-         "}")
-       (0 font-lock-keyword-face prepend))
-      ("\\([@\\]b\\)[ \t\n]+\\([^ \t\n]+\\)"
-       (1 font-lock-keyword-face prepend)
-       (2 'bold prepend))
-      ("\\([@\\]em?\\)[ \t\n]+\\([^ \t\n]+\\)"
-       (1 font-lock-keyword-face prepend)
-       (2 'italic prepend))
-      ("\\([@\\][cp]\\)[ \t\n]+\\([^ \t\n]+\\)"
-       (1 font-lock-keyword-face prepend)
-       (2 'underline prepend)))))
-
-;;; mode ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defvar doc-mode-lighter " doc")
-
-(defvar doc-mode-prefix-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map "d" 'doc-mode-fix-tag-doc)
-    (define-key map "c" 'doc-mode-check-tag-doc)
-    (define-key map "t" 'doc-mode-toggle-tag-doc-folding)
-    (define-key map "f" 'doc-mode-fold-tag-doc)
-    (define-key map "u" 'doc-mode-unfold-tag-doc)
-    (define-key map "r" 'doc-mode-remove-tag-doc)
-    (define-key map "i" 'doc-mode-add-tag-doc)
-    (define-key map "e" 'doc-mode-next-faulty-doc)
-    (define-key map "n" 'doc-mode-next-template)
-    (define-key map "\C-c" 'doc-mode-check-buffer)
-    (define-key map "\C-f" 'doc-mode-fold-all)
-    (define-key map "\C-u" 'doc-mode-unfold-all)
-    map))
-
-;;;###autoload
-(define-minor-mode doc-mode
-  "Minor mode for editing in-code documentation."
-  nil doc-mode-lighter (list (cons doc-mode-prefix-key doc-mode-prefix-map))
-  (if doc-mode
-      (progn
-        (font-lock-add-keywords nil doc-mode-font-lock-keywords)
-        (when doc-mode-auto-check-p
-          (add-hook 'semantic-after-auto-parse-hooks 'doc-mode-check-buffer
-                    nil t)
-          (add-hook 'semantic-after-idle-scheduler-reparse-hooks
-                    'doc-mode-check-buffer nil t)))
-    (dolist (ov doc-mode-templates)
-      (delete-overlay ov))
-    (kill-local-variable 'doc-mode-templates)
-    (doc-mode-unfold-all)
-    (font-lock-remove-keywords nil doc-mode-font-lock-keywords)
-    (remove-hook 'semantic-after-auto-parse-hooks 'doc-mode-check-buffer t)
-    (remove-hook 'semantic-after-idle-scheduler-reparse-hooks
-                 'doc-mode-check-buffer t))
-
-  (when font-lock-mode
-    (font-lock-fontify-buffer)))
 
 (provide 'doc-mode)
 
