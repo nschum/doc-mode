@@ -339,6 +339,9 @@ undetermined content should be created with `doc-mode-new-keyword'."
     map)
   "Keymap used for `doc-mode'.")
 
+(defvar doc-mode-hook nil
+  "Hook run after enabling `doc-mode'.")
+
 ;;;###autoload
 (define-minor-mode doc-mode
   "Minor mode for editing in-code documentation."
