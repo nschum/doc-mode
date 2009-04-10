@@ -656,6 +656,7 @@ argument value) or (keyword argument)."
 
 (defun doc-mode-find-eligible-tags ()
   (when buffer-file-name
+    (semantic-fetch-tags)
     (unless (or (semantic-parse-tree-unparseable-p)
                 (semantic-parse-tree-needs-rebuild-p)
                 (semantic-parse-tree-needs-update-p))
