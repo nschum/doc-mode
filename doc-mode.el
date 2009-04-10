@@ -42,6 +42,17 @@
 ;; You can fold the comments by using `doc-mode-toggle-tag-doc-folding' or
 ;; `doc-mode-fold-all'.
 ;;
+;; Folding the tags immediately after load can fail, because semantic might not
+;; have initialized the buffer.  The following code therefore delays the
+;; folding:
+;;
+;; (add-hook 'doc-mode-hook
+;;           (lambda ()
+;;             (when doc-mode
+;;               (if (semantic-active-p)
+;;                   (doc-mode-fold-all)
+;;                 (add-hook 'semantic-init-hooks 'doc-mode-fold-all nil t))))
+;;
 ;;; Change Log:
 ;;
 ;; 2009-03-22 (0.2)
